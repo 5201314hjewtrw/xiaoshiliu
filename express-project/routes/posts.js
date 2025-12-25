@@ -561,13 +561,13 @@ router.get('/following', authenticateToken, async (req, res) => {
     const type = req.query.type ? parseInt(req.query.type) : null;
     const currentUserId = req.user.id;
 
-    // 首先检查用户是否有关注的人
-    const [followingCount] = await pool.execute(
-      'SELECT COUNT(*) as count FROM follows WHERE follower_id = ?',
+    // 首先检查用户是否有关注的人 (使用 LIMIT 1 优化性能)
+    const [followingCheck] = await pool.execute(
+      'SELECT 1 FROM follows WHERE follower_id = ? LIMIT 1',
       [currentUserId.toString()]
     );
 
-    const hasFollowing = followingCount[0].count > 0;
+    const hasFollowing = followingCheck.length > 0;
 
     if (!hasFollowing) {
       // 如果用户没有关注任何人，返回推荐用户列表
@@ -638,41 +638,81 @@ router.get('/following', authenticateToken, async (req, res) => {
 
     const [rows] = await pool.execute(query, queryParams);
 
-    // 获取每个笔记的图片、标签和用户点赞收藏状态
-    for (let post of rows) {
-      // 根据笔记类型获取图片或视频封面
-      if (post.type === 2) {
-        // 视频笔记：获取视频封面
-        const [videos] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [post.id]);
-        post.images = videos.length > 0 && videos[0].cover_url ? [videos[0].cover_url] : [];
-        post.video_url = videos.length > 0 ? videos[0].video_url : null;
-        post.image = videos.length > 0 && videos[0].cover_url ? videos[0].cover_url : null;
-      } else {
-        // 图文笔记：获取笔记图片
-        const [images] = await pool.execute('SELECT image_url FROM post_images WHERE post_id = ?', [post.id]);
-        post.images = images.map(img => img.image_url);
-        post.image = images.length > 0 ? images[0].image_url : null;
+    // 如果有笔记，使用批量查询优化性能
+    if (rows.length > 0) {
+      const postIds = rows.map(post => post.id);
+      // 创建占位符字符串和参数数组
+      const placeholders = postIds.map(() => '?').join(',');
+
+      // 批量获取所有图片
+      const [allImages] = await pool.execute(
+        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        postIds
+      );
+      const imagesByPostId = {};
+      allImages.forEach(img => {
+        if (!imagesByPostId[img.post_id]) {
+          imagesByPostId[img.post_id] = [];
+        }
+        imagesByPostId[img.post_id].push(img.image_url);
+      });
+
+      // 批量获取所有视频
+      const [allVideos] = await pool.execute(
+        `SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (${placeholders})`,
+        postIds
+      );
+      const videosByPostId = {};
+      allVideos.forEach(video => {
+        videosByPostId[video.post_id] = video;
+      });
+
+      // 批量获取所有标签
+      const [allTags] = await pool.execute(
+        `SELECT pt.post_id, t.id, t.name FROM tags t 
+         JOIN post_tags pt ON t.id = pt.tag_id 
+         WHERE pt.post_id IN (${placeholders})`,
+        postIds
+      );
+      const tagsByPostId = {};
+      allTags.forEach(tag => {
+        if (!tagsByPostId[tag.post_id]) {
+          tagsByPostId[tag.post_id] = [];
+        }
+        tagsByPostId[tag.post_id].push({ id: tag.id, name: tag.name });
+      });
+
+      // 批量获取当前用户的点赞状态
+      const [allLikes] = await pool.execute(
+        `SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (${placeholders})`,
+        [currentUserId, ...postIds]
+      );
+      const likedPostIds = new Set(allLikes.map(like => like.target_id));
+
+      // 批量获取当前用户的收藏状态
+      const [allCollections] = await pool.execute(
+        `SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (${placeholders})`,
+        [currentUserId, ...postIds]
+      );
+      const collectedPostIds = new Set(allCollections.map(c => c.post_id));
+
+      // 为每个笔记填充数据
+      for (let post of rows) {
+        if (post.type === 2) {
+          // 视频笔记
+          const video = videosByPostId[post.id];
+          post.images = video && video.cover_url ? [video.cover_url] : [];
+          post.video_url = video ? video.video_url : null;
+          post.image = video && video.cover_url ? video.cover_url : null;
+        } else {
+          // 图文笔记
+          post.images = imagesByPostId[post.id] || [];
+          post.image = post.images.length > 0 ? post.images[0] : null;
+        }
+        post.tags = tagsByPostId[post.id] || [];
+        post.liked = likedPostIds.has(post.id);
+        post.collected = collectedPostIds.has(post.id);
       }
-
-      // 获取笔记标签
-      const [tags] = await pool.execute(
-        'SELECT t.id, t.name FROM tags t JOIN post_tags pt ON t.id = pt.tag_id WHERE pt.post_id = ?',
-        [post.id]
-      );
-      post.tags = tags;
-
-      // 检查当前用户是否已点赞和收藏
-      const [likeResult] = await pool.execute(
-        'SELECT id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id = ?',
-        [currentUserId, post.id]
-      );
-      post.liked = likeResult.length > 0;
-
-      const [collectResult] = await pool.execute(
-        'SELECT id FROM collections WHERE user_id = ? AND post_id = ?',
-        [currentUserId, post.id]
-      );
-      post.collected = collectResult.length > 0;
     }
 
     // 获取关注用户笔记总数
