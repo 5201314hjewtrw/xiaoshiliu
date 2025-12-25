@@ -304,6 +304,205 @@ router.get('/', optionalAuth, async (req, res) => {
   }
 });
 
+// 获取关注用户的笔记列表（必须放在 /:id 之前）
+router.get('/following', authenticateToken, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = (page - 1) * limit;
+    const sort = req.query.sort || 'time'; // 排序方式：time（最新）或 hot（热度）
+    const type = req.query.type ? parseInt(req.query.type) : null;
+    const currentUserId = req.user.id;
+
+    // 首先检查用户是否有关注的人 (使用 LIMIT 1 优化性能)
+    const [followingCheck] = await pool.execute(
+      'SELECT 1 FROM follows WHERE follower_id = ? LIMIT 1',
+      [currentUserId.toString()]
+    );
+
+    const hasFollowing = followingCheck.length > 0;
+
+    if (!hasFollowing) {
+      // 如果用户没有关注任何人，返回随机推荐用户列表
+      // 使用 RAND() 随机排序，不使用推荐算法
+      const [recommendedUsers] = await pool.execute(
+        `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.fans_count, u.verified,
+                (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND is_draft = 0) as post_count
+         FROM users u
+         WHERE u.id != ? AND IFNULL(u.is_active, 1) = 1
+         ORDER BY RAND()
+         LIMIT 10`,
+        [currentUserId.toString()]
+      );
+
+      // 检查每个推荐用户的关注状态
+      for (let user of recommendedUsers) {
+        user.isFollowing = false;
+        user.buttonType = 'follow';
+      }
+
+      return res.json({
+        code: RESPONSE_CODES.SUCCESS,
+        message: 'success',
+        data: {
+          posts: [],
+          recommendedUsers,
+          hasFollowing: false,
+          pagination: {
+            page: 1,
+            limit,
+            total: 0,
+            pages: 0
+          }
+        }
+      });
+    }
+
+    // 构建排序条件
+    let orderBy = '';
+    if (sort === 'hot') {
+      // 热度排序：综合点赞、评论、收藏和浏览量
+      orderBy = 'ORDER BY (p.like_count * 3 + p.comment_count * 2 + p.collect_count * 2 + p.view_count * 0.1) DESC, p.created_at DESC';
+    } else {
+      // 时间排序：最新发布的在前
+      orderBy = 'ORDER BY p.created_at DESC';
+    }
+
+    // 构建类型筛选条件
+    let typeCondition = '';
+    let queryParams = [currentUserId.toString()];
+    if (type) {
+      typeCondition = 'AND p.type = ?';
+      queryParams.push(type.toString());
+    }
+
+    // 获取关注用户的笔记
+    const query = `
+      SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified, c.name as category
+      FROM posts p
+      LEFT JOIN users u ON p.user_id = u.id
+      LEFT JOIN categories c ON p.category_id = c.id
+      WHERE p.is_draft = 0 
+        AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
+        ${typeCondition}
+      ${orderBy}
+      LIMIT ? OFFSET ?
+    `;
+    queryParams.push(limit.toString(), offset.toString());
+
+    const [rows] = await pool.execute(query, queryParams);
+
+    // 如果有笔记，使用批量查询优化性能
+    if (rows.length > 0) {
+      const postIds = rows.map(post => post.id);
+      // 创建占位符字符串和参数数组
+      const placeholders = postIds.map(() => '?').join(',');
+
+      // 批量获取所有图片
+      const [allImages] = await pool.execute(
+        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        postIds
+      );
+      const imagesByPostId = {};
+      allImages.forEach(img => {
+        if (!imagesByPostId[img.post_id]) {
+          imagesByPostId[img.post_id] = [];
+        }
+        imagesByPostId[img.post_id].push(img.image_url);
+      });
+
+      // 批量获取所有视频
+      const [allVideos] = await pool.execute(
+        `SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (${placeholders})`,
+        postIds
+      );
+      const videosByPostId = {};
+      allVideos.forEach(video => {
+        videosByPostId[video.post_id] = video;
+      });
+
+      // 批量获取所有标签
+      const [allTags] = await pool.execute(
+        `SELECT pt.post_id, t.id, t.name FROM tags t 
+         JOIN post_tags pt ON t.id = pt.tag_id 
+         WHERE pt.post_id IN (${placeholders})`,
+        postIds
+      );
+      const tagsByPostId = {};
+      allTags.forEach(tag => {
+        if (!tagsByPostId[tag.post_id]) {
+          tagsByPostId[tag.post_id] = [];
+        }
+        tagsByPostId[tag.post_id].push({ id: tag.id, name: tag.name });
+      });
+
+      // 批量获取当前用户的点赞状态
+      const [allLikes] = await pool.execute(
+        `SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (${placeholders})`,
+        [currentUserId, ...postIds]
+      );
+      const likedPostIds = new Set(allLikes.map(like => like.target_id));
+
+      // 批量获取当前用户的收藏状态
+      const [allCollections] = await pool.execute(
+        `SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (${placeholders})`,
+        [currentUserId, ...postIds]
+      );
+      const collectedPostIds = new Set(allCollections.map(c => c.post_id));
+
+      // 为每个笔记填充数据
+      for (let post of rows) {
+        if (post.type === 2) {
+          // 视频笔记
+          const video = videosByPostId[post.id];
+          post.images = video && video.cover_url ? [video.cover_url] : [];
+          post.video_url = video ? video.video_url : null;
+          post.image = video && video.cover_url ? video.cover_url : null;
+        } else {
+          // 图文笔记
+          post.images = imagesByPostId[post.id] || [];
+          post.image = post.images.length > 0 ? post.images[0] : null;
+        }
+        post.tags = tagsByPostId[post.id] || [];
+        post.liked = likedPostIds.has(post.id);
+        post.collected = collectedPostIds.has(post.id);
+      }
+    }
+
+    // 获取关注用户笔记总数
+    let countQuery = `
+      SELECT COUNT(*) as total FROM posts p
+      WHERE p.is_draft = 0 
+        AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
+        ${typeCondition}
+    `;
+    let countParams = [currentUserId.toString()];
+    if (type) {
+      countParams.push(type.toString());
+    }
+    const [countResult] = await pool.execute(countQuery, countParams);
+    const total = countResult[0].total;
+
+    res.json({
+      code: RESPONSE_CODES.SUCCESS,
+      message: 'success',
+      data: {
+        posts: rows,
+        hasFollowing: true,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('获取关注用户笔记列表失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
+  }
+});
+
 // 获取笔记详情
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
@@ -547,205 +746,6 @@ router.post('/', authenticateToken, async (req, res) => {
     });
   } catch (error) {
     console.error('❌ 创建笔记失败:', error);
-    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
-  }
-});
-
-// 获取关注用户的笔记列表
-router.get('/following', authenticateToken, async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const offset = (page - 1) * limit;
-    const sort = req.query.sort || 'time'; // 排序方式：time（最新）或 hot（热度）
-    const type = req.query.type ? parseInt(req.query.type) : null;
-    const currentUserId = req.user.id;
-
-    // 首先检查用户是否有关注的人 (使用 LIMIT 1 优化性能)
-    const [followingCheck] = await pool.execute(
-      'SELECT 1 FROM follows WHERE follower_id = ? LIMIT 1',
-      [currentUserId.toString()]
-    );
-
-    const hasFollowing = followingCheck.length > 0;
-
-    if (!hasFollowing) {
-      // 如果用户没有关注任何人，返回推荐用户列表
-      // 使用 IFNULL 处理 is_active 为 NULL 的情况，默认视为激活状态
-      const [recommendedUsers] = await pool.execute(
-        `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.fans_count, u.verified,
-                (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND is_draft = 0) as post_count
-         FROM users u
-         WHERE u.id != ? AND IFNULL(u.is_active, 1) = 1
-         ORDER BY u.fans_count DESC
-         LIMIT 10`,
-        [currentUserId.toString()]
-      );
-
-      // 检查每个推荐用户的关注状态
-      for (let user of recommendedUsers) {
-        user.isFollowing = false;
-        user.buttonType = 'follow';
-      }
-
-      return res.json({
-        code: RESPONSE_CODES.SUCCESS,
-        message: 'success',
-        data: {
-          posts: [],
-          recommendedUsers,
-          hasFollowing: false,
-          pagination: {
-            page: 1,
-            limit,
-            total: 0,
-            pages: 0
-          }
-        }
-      });
-    }
-
-    // 构建排序条件
-    let orderBy = '';
-    if (sort === 'hot') {
-      // 热度排序：综合点赞、评论、收藏和浏览量
-      orderBy = 'ORDER BY (p.like_count * 3 + p.comment_count * 2 + p.collect_count * 2 + p.view_count * 0.1) DESC, p.created_at DESC';
-    } else {
-      // 时间排序：最新发布的在前
-      orderBy = 'ORDER BY p.created_at DESC';
-    }
-
-    // 构建类型筛选条件
-    let typeCondition = '';
-    let queryParams = [currentUserId.toString()];
-    if (type) {
-      typeCondition = 'AND p.type = ?';
-      queryParams.push(type.toString());
-    }
-
-    // 获取关注用户的笔记
-    const query = `
-      SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified, c.name as category
-      FROM posts p
-      LEFT JOIN users u ON p.user_id = u.id
-      LEFT JOIN categories c ON p.category_id = c.id
-      WHERE p.is_draft = 0 
-        AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
-        ${typeCondition}
-      ${orderBy}
-      LIMIT ? OFFSET ?
-    `;
-    queryParams.push(limit.toString(), offset.toString());
-
-    const [rows] = await pool.execute(query, queryParams);
-
-    // 如果有笔记，使用批量查询优化性能
-    if (rows.length > 0) {
-      const postIds = rows.map(post => post.id);
-      // 创建占位符字符串和参数数组
-      const placeholders = postIds.map(() => '?').join(',');
-
-      // 批量获取所有图片
-      const [allImages] = await pool.execute(
-        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
-        postIds
-      );
-      const imagesByPostId = {};
-      allImages.forEach(img => {
-        if (!imagesByPostId[img.post_id]) {
-          imagesByPostId[img.post_id] = [];
-        }
-        imagesByPostId[img.post_id].push(img.image_url);
-      });
-
-      // 批量获取所有视频
-      const [allVideos] = await pool.execute(
-        `SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (${placeholders})`,
-        postIds
-      );
-      const videosByPostId = {};
-      allVideos.forEach(video => {
-        videosByPostId[video.post_id] = video;
-      });
-
-      // 批量获取所有标签
-      const [allTags] = await pool.execute(
-        `SELECT pt.post_id, t.id, t.name FROM tags t 
-         JOIN post_tags pt ON t.id = pt.tag_id 
-         WHERE pt.post_id IN (${placeholders})`,
-        postIds
-      );
-      const tagsByPostId = {};
-      allTags.forEach(tag => {
-        if (!tagsByPostId[tag.post_id]) {
-          tagsByPostId[tag.post_id] = [];
-        }
-        tagsByPostId[tag.post_id].push({ id: tag.id, name: tag.name });
-      });
-
-      // 批量获取当前用户的点赞状态
-      const [allLikes] = await pool.execute(
-        `SELECT target_id FROM likes WHERE user_id = ? AND target_type = 1 AND target_id IN (${placeholders})`,
-        [currentUserId, ...postIds]
-      );
-      const likedPostIds = new Set(allLikes.map(like => like.target_id));
-
-      // 批量获取当前用户的收藏状态
-      const [allCollections] = await pool.execute(
-        `SELECT post_id FROM collections WHERE user_id = ? AND post_id IN (${placeholders})`,
-        [currentUserId, ...postIds]
-      );
-      const collectedPostIds = new Set(allCollections.map(c => c.post_id));
-
-      // 为每个笔记填充数据
-      for (let post of rows) {
-        if (post.type === 2) {
-          // 视频笔记
-          const video = videosByPostId[post.id];
-          post.images = video && video.cover_url ? [video.cover_url] : [];
-          post.video_url = video ? video.video_url : null;
-          post.image = video && video.cover_url ? video.cover_url : null;
-        } else {
-          // 图文笔记
-          post.images = imagesByPostId[post.id] || [];
-          post.image = post.images.length > 0 ? post.images[0] : null;
-        }
-        post.tags = tagsByPostId[post.id] || [];
-        post.liked = likedPostIds.has(post.id);
-        post.collected = collectedPostIds.has(post.id);
-      }
-    }
-
-    // 获取关注用户笔记总数
-    let countQuery = `
-      SELECT COUNT(*) as total FROM posts p
-      WHERE p.is_draft = 0 
-        AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
-        ${typeCondition}
-    `;
-    let countParams = [currentUserId.toString()];
-    if (type) {
-      countParams.push(type.toString());
-    }
-    const [countResult] = await pool.execute(countQuery, countParams);
-    const total = countResult[0].total;
-
-    res.json({
-      code: RESPONSE_CODES.SUCCESS,
-      message: 'success',
-      data: {
-        posts: rows,
-        hasFollowing: true,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
-      }
-    });
-  } catch (error) {
-    console.error('获取关注用户笔记列表失败:', error);
     res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: ERROR_MESSAGES.INTERNAL_SERVER_ERROR });
   }
 });
