@@ -571,11 +571,12 @@ router.get('/following', authenticateToken, async (req, res) => {
 
     if (!hasFollowing) {
       // 如果用户没有关注任何人，返回推荐用户列表
+      // 使用 IFNULL 处理 is_active 为 NULL 的情况，默认视为激活状态
       const [recommendedUsers] = await pool.execute(
         `SELECT u.id, u.user_id, u.nickname, u.avatar, u.bio, u.location, u.fans_count, u.verified,
                 (SELECT COUNT(*) FROM posts WHERE user_id = u.id AND is_draft = 0) as post_count
          FROM users u
-         WHERE u.id != ? AND u.is_active = 1
+         WHERE u.id != ? AND IFNULL(u.is_active, 1) = 1
          ORDER BY u.fans_count DESC
          LIMIT 10`,
         [currentUserId.toString()]

@@ -475,6 +475,18 @@ export async function getFollowingPosts(params = {}) {
   } = params
 
   try {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      console.warn('获取关注用户笔记需要登录')
+      return {
+        posts: [],
+        recommendedUsers: [],
+        hasFollowing: false,
+        pagination: { page, limit, total: 0, pages: 0 },
+        hasMore: false
+      }
+    }
+
     const queryParams = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),
@@ -487,7 +499,7 @@ export async function getFollowingPosts(params = {}) {
 
     const response = await fetch(`${apiConfig.baseURL}/posts/following?${queryParams.toString()}`, {
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
+        'Authorization': `Bearer ${token}`
       }
     }).then(res => res.json())
 
@@ -499,6 +511,8 @@ export async function getFollowingPosts(params = {}) {
         pagination: response.data.pagination,
         hasMore: response.data.pagination.page < response.data.pagination.pages
       }
+    } else {
+      console.error('获取关注用户笔记返回错误:', response)
     }
   } catch (error) {
     console.error('获取关注用户笔记列表失败:', error)
