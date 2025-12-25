@@ -66,7 +66,7 @@
             <div class="tiktok-avatar-container" @click="onUserClick(authorData.id)">
               <img :src="authorData.avatar" :alt="authorData.name" class="tiktok-avatar" @error="handleAvatarError" />
             </div>
-            <span class="tiktok-username" @click="onUserClick(authorData.id)">{{ authorData.name }}</span>
+            <span class="tiktok-username" tabindex="0" @click="onUserClick(authorData.id)" @keyup.enter="onUserClick(authorData.id)">{{ authorData.name }}</span>
             <FollowButton v-if="!isCurrentUserPost" :is-following="authorData.isFollowing" :user-id="authorData.id"
               @follow="handleFollow" @unfollow="handleUnfollow" class="tiktok-follow-btn" />
           </div>
@@ -77,13 +77,13 @@
             <div class="tiktok-content" :class="{ 'expanded': isContentExpanded }">
               <ContentRenderer :text="postData.content" />
             </div>
-            <span v-if="shouldShowExpandBtn" class="tiktok-expand-btn" @click="toggleContentExpand">
+            <span v-if="shouldShowExpandBtn" class="tiktok-expand-btn" tabindex="0" @click="toggleContentExpand" @keyup.enter="toggleContentExpand">
               {{ isContentExpanded ? '收起' : '展开' }}
             </span>
           </div>
           <!-- 话题标签 -->
           <div class="tiktok-tags">
-            <span v-for="tag in postData.tags" :key="tag" class="tiktok-tag" @click="handleTagClick(tag)">#{{ tag }}</span>
+            <span v-for="tag in postData.tags" :key="tag" class="tiktok-tag" tabindex="0" @click="handleTagClick(tag)" @keyup.enter="handleTagClick(tag)">#{{ tag }}</span>
           </div>
         </div>
 
