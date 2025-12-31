@@ -80,11 +80,28 @@ export function usePlayerConfig() {
       streaming: {
         bufferingGoal: playerConfig.buffering_goal,
         rebufferingGoal: playerConfig.rebuffering_goal,
-        bufferBehind: playerConfig.buffer_behind
+        bufferBehind: playerConfig.buffer_behind,
+        // 在Safari上使用原生HLS播放器
+        useNativeHlsOnSafari: true,
+        // 重试配置
+        retryParameters: {
+          maxAttempts: 3,
+          baseDelay: 1000,
+          backoffFactor: 2,
+          fuzzFactor: 0.5
+        }
       },
       abr: {
         enabled: playerConfig.abr_enabled,
         defaultBandwidthEstimate: playerConfig.abr_default_bandwidth
+      },
+      manifest: {
+        retryParameters: {
+          maxAttempts: 3,
+          baseDelay: 1000,
+          backoffFactor: 2,
+          fuzzFactor: 0.5
+        }
       }
     }
   }

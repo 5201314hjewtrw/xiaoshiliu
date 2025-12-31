@@ -23,6 +23,10 @@ function transformPostData(backendPost) {
     video_url: backendPost.video_url,
     cover_url: backendPost.cover_url,
     videos: backendPost.videos || [],
+    // 视频转码相关字段
+    mpd_path: backendPost.mpd_path || null,
+    transcode_status: backendPost.transcode_status || null,
+    transcode_task_id: backendPost.transcode_task_id || null,
     avatar: backendPost.user_avatar || new URL('@/assets/imgs/avatar.png', import.meta.url).href,
     author: backendPost.nickname || '匿名用户',
     location: backendPost.location || '',

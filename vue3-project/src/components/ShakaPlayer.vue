@@ -324,7 +324,26 @@ async function loadSource(src) {
     }
   } catch (err) {
     console.error('加载视频失败:', err)
-    error.value = '视频加载失败'
+    
+    // 提供更详细的错误信息
+    let errorMessage = '视频加载失败'
+    if (err.code) {
+      switch (err.code) {
+        case 4003:
+          errorMessage = 'DASH清单格式不正确'
+          break
+        case 1001:
+          errorMessage = '网络错误，请检查连接'
+          break
+        case 1002:
+          errorMessage = '请求超时'
+          break
+        default:
+          errorMessage = `加载失败 (${err.code})`
+      }
+    }
+    
+    error.value = errorMessage
     isLoading.value = false
   }
 }
@@ -399,7 +418,29 @@ function setupVideoEvents() {
 function onPlayerError(event) {
   const detail = event.detail
   console.error('Shaka Player错误:', detail)
-  error.value = '视频播放出错'
+  
+  // 根据错误代码提供更详细的错误信息
+  let errorMessage = '视频播放出错'
+  if (detail && detail.code) {
+    switch (detail.code) {
+      case 4003:
+        errorMessage = 'DASH清单格式错误，视频无法播放'
+        break
+      case 1001:
+        errorMessage = '网络错误，请检查网络连接'
+        break
+      case 1002:
+        errorMessage = '请求超时，请稍后重试'
+        break
+      case 3016:
+        errorMessage = '不支持的视频格式'
+        break
+      default:
+        errorMessage = `播放错误 (${detail.code})`
+    }
+  }
+  
+  error.value = errorMessage
   emit('error', detail)
 }
 

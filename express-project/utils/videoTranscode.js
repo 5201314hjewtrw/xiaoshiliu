@@ -85,6 +85,28 @@ class TranscodeQueueManager extends EventEmitter {
   }
 
   /**
+   * 设置任务的关联postId
+   * @param {string} taskId - 任务ID
+   * @param {number} postId - 帖子ID
+   * @returns {boolean} 是否设置成功
+   */
+  setJobPostId(taskId, postId) {
+    // 先查找活动任务
+    if (this.activeJobs.has(taskId)) {
+      const job = this.activeJobs.get(taskId);
+      job.postId = postId;
+      return true;
+    }
+    // 查找队列中的任务
+    const queuedJob = this.queue.find(j => j.taskId === taskId);
+    if (queuedJob) {
+      queuedJob.postId = postId;
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * 获取队列状态概览
    * @returns {Object} 队列状态
    */
@@ -262,7 +284,8 @@ async function getTranscodeConfig() {
     format,
     outputDirMode,
     retainOriginal,
-    maxConcurrentTasks
+    maxConcurrentTasks,
+    segmentDuration
   ] = await Promise.all([
     getSetting('video_transcode_enabled', 'false'),
     getSetting('video_transcode_min_bitrate', '500'),
@@ -270,7 +293,8 @@ async function getTranscodeConfig() {
     getSetting('video_transcode_format', 'dash'),
     getSetting('video_transcode_output_dir_mode', 'datetime'),
     getSetting('video_transcode_retain_original', 'true'),
-    getSetting('video_transcode_max_concurrent', '2')
+    getSetting('video_transcode_max_concurrent', '2'),
+    getSetting('video_transcode_segment_duration', '4')
   ]);
 
   return {
@@ -280,7 +304,8 @@ async function getTranscodeConfig() {
     format: format || 'dash',
     outputDirMode: outputDirMode || 'datetime', // 'flat', 'datetime', 'date'
     retainOriginal: retainOriginal !== 'false', // 默认保留
-    maxConcurrentTasks: parseInt(maxConcurrentTasks, 10) || 2
+    maxConcurrentTasks: parseInt(maxConcurrentTasks, 10) || 2,
+    segmentDuration: parseInt(segmentDuration, 10) || 4 // DASH切片秒数，默认4秒
   };
 }
 
@@ -363,13 +388,24 @@ function getVideoInfo(inputPath) {
       } else {
         const videoStream = metadata.streams.find(s => s.codec_type === 'video');
         const audioStream = metadata.streams.find(s => s.codec_type === 'audio');
+        
+        // 解析帧率 (格式如 "30/1" 或 "25/1")
+        let framerate = 30; // 默认30fps
+        if (videoStream?.r_frame_rate) {
+          const parts = videoStream.r_frame_rate.split('/');
+          if (parts.length === 2) {
+            framerate = Math.round(parseInt(parts[0]) / parseInt(parts[1]));
+          }
+        }
+        
         resolve({
           duration: metadata.format.duration,
           width: videoStream?.width,
           height: videoStream?.height,
           bitrate: metadata.format.bit_rate,
           videoCodec: videoStream?.codec_name,
-          audioCodec: audioStream?.codec_name
+          audioCodec: audioStream?.codec_name,
+          framerate: framerate
         });
       }
     });
@@ -442,6 +478,12 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
     // 获取视频信息
     const videoInfo = await getVideoInfo(inputPath);
     
+    // 获取切片时长（秒）
+    const segmentDuration = options.segmentDuration || transcodeConfig.segmentDuration || 4;
+    // 计算关键帧间隔（使用实际帧率，默认30fps）
+    const framerate = videoInfo.framerate || 30;
+    const gopSize = segmentDuration * framerate;
+    
     // 生成质量等级
     const qualities = generateQualityLevels(
       videoInfo,
@@ -462,77 +504,95 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
     const timestamp = Date.now();
     const baseName = `video_${timestamp}_${hash}`;
     
-    // 转码为各个质量等级
-    const transcodedFiles = [];
-    const transcodeErrors = [];
-    const totalQualities = qualities.length;
-    let completedQualities = 0;
-    
-    for (const quality of qualities) {
-      const outputFile = path.join(finalOutputDir, `${baseName}_${quality.label}.mp4`);
-      
-      try {
-        await new Promise((resolve, reject) => {
-          ffmpeg(inputPath)
-            .videoCodec('libx264')
-            .audioCodec('aac')
-            .size(`?x${quality.height}`)
-            .videoBitrate(`${quality.bitrate}k`)
-            .outputOptions([
-              `-maxrate ${quality.maxrate}k`,
-              `-bufsize ${quality.bufsize}k`,
-              '-preset medium',
-              '-profile:v main',
-              '-level 3.1',
-              '-movflags +faststart'
-            ])
-            .on('start', (cmd) => {
-              console.log(`开始转码 ${quality.label}: ${cmd}`);
-            })
-            .on('progress', (progress) => {
-              const qualityProgress = (progress.percent || 0) / 100;
-              const overallProgress = ((completedQualities + qualityProgress) / totalQualities) * 100;
-              console.log(`转码进度 ${quality.label}: ${Math.round(progress.percent || 0)}%`);
-              if (onProgress) onProgress(Math.round(overallProgress));
-            })
-            .on('end', () => {
-              console.log(`转码完成 ${quality.label}`);
-              completedQualities++;
-              transcodedFiles.push({
-                quality: quality.label,
-                path: outputFile,
-                bitrate: quality.bitrate
-              });
-              if (onProgress) onProgress(Math.round((completedQualities / totalQualities) * 100));
-              resolve();
-            })
-            .on('error', (err) => {
-              const errorMsg = `转码失败 [${quality.label}] (bitrate: ${quality.bitrate}k, height: ${quality.height}px): ${err.message}`;
-              console.error(errorMsg);
-              reject(new Error(errorMsg));
-            })
-            .save(outputFile);
-        });
-      } catch (qualityError) {
-        console.warn(`质量等级 ${quality.label} 转码失败，继续处理其他质量等级:`, qualityError.message);
-        transcodeErrors.push({ quality: quality.label, error: qualityError.message });
-        completedQualities++;
-        // 继续处理其他质量等级，不中断整个流程
-      }
-    }
-
-    // 如果没有任何质量等级转码成功，返回失败
-    if (transcodedFiles.length === 0) {
-      return {
-        success: false,
-        message: '所有质量等级转码均失败',
-        errors: transcodeErrors
-      };
-    }
-
-    // 生成 DASH manifest (MPD)
+    // 使用FFmpeg原生DASH输出（直接生成MPD和分片文件）
     const mpdPath = path.join(finalOutputDir, `${baseName}.mpd`);
-    await generateDashManifest(transcodedFiles, mpdPath, videoInfo);
+    
+    // 构建多码率输出参数
+    const outputOptions = [];
+    const filterComplex = [];
+    const maps = [];
+    
+    // 为每个质量等级创建输出流
+    qualities.forEach((quality, index) => {
+      // 缩放滤镜
+      filterComplex.push(`[0:v]scale=-2:${quality.height}[v${index}]`);
+      
+      // 视频流映射
+      maps.push(`-map [v${index}]`);
+      maps.push(`-map 0:a?`);
+      
+      // 每个流的编码参数
+      outputOptions.push(`-c:v:${index} libx264`);
+      outputOptions.push(`-b:v:${index} ${quality.bitrate}k`);
+      outputOptions.push(`-maxrate:v:${index} ${quality.maxrate}k`);
+      outputOptions.push(`-bufsize:v:${index} ${quality.bufsize}k`);
+      outputOptions.push(`-profile:v:${index} main`);
+      outputOptions.push(`-level:v:${index} 3.1`);
+    });
+    
+    // 音频编码参数（所有流共用）
+    outputOptions.push('-c:a aac');
+    outputOptions.push('-b:a 128k');
+    outputOptions.push('-ac 2');
+    
+    // DASH输出参数
+    outputOptions.push('-f dash');
+    outputOptions.push(`-seg_duration ${segmentDuration}`);
+    outputOptions.push('-use_timeline 1');
+    outputOptions.push('-use_template 1');
+    outputOptions.push(`-init_seg_name ${baseName}_init_$RepresentationID$.m4s`);
+    outputOptions.push(`-media_seg_name ${baseName}_chunk_$RepresentationID$_$Number%05d$.m4s`);
+    outputOptions.push(`-adaptation_sets id=0,streams=v id=1,streams=a`);
+    
+    // 关键帧设置
+    outputOptions.push(`-g ${gopSize}`);
+    outputOptions.push(`-keyint_min ${gopSize}`);
+    outputOptions.push('-sc_threshold 0');
+    outputOptions.push('-preset medium');
+    
+    try {
+      await new Promise((resolve, reject) => {
+        let cmd = ffmpeg(inputPath);
+        
+        // 应用滤镜
+        if (filterComplex.length > 0) {
+          cmd = cmd.complexFilter(filterComplex);
+        }
+        
+        // 应用映射和输出选项
+        cmd
+          .outputOptions([...maps, ...outputOptions])
+          .on('start', (cmdStr) => {
+            console.log(`开始DASH转码: ${cmdStr}`);
+          })
+          .on('progress', (progress) => {
+            const percent = progress.percent || 0;
+            console.log(`DASH转码进度: ${Math.round(percent)}%`);
+            if (onProgress) onProgress(Math.round(percent));
+          })
+          .on('end', () => {
+            console.log('DASH转码完成');
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('DASH转码失败:', err);
+            reject(err);
+          })
+          .save(mpdPath);
+      });
+      
+      // 检查MPD文件是否生成成功
+      if (!fs.existsSync(mpdPath)) {
+        throw new Error('MPD文件生成失败');
+      }
+      
+      // 收集生成的文件信息
+      const transcodedFiles = qualities.map((quality, index) => ({
+        quality: quality.label,
+        height: quality.height,
+        bitrate: quality.bitrate,
+        width: Math.round(quality.height * 16 / 9)
+      }));
 
     // 清理临时输入文件（始终清理temp目录中的文件）
     if (inputPath && fs.existsSync(inputPath) && inputPath.includes(path.join('uploads', 'temp'))) {
@@ -554,7 +614,7 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
 
     return {
       success: true,
-      message: transcodeErrors.length > 0 ? `视频转码部分完成，${transcodeErrors.length}个质量等级失败` : '视频转码完成',
+      message: '视频转码完成',
       data: {
         baseName,
         mpdPath,
@@ -564,6 +624,71 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
         retainedOriginal: transcodeConfig.retainOriginal
       }
     };
+    } catch (dashError) {
+      console.error('DASH转码失败，尝试使用简单模式:', dashError.message);
+      
+      // 回退到简单的单文件转码模式
+      const singleOutputFile = path.join(finalOutputDir, `${baseName}.mp4`);
+      // 选择中等质量：如果有多个质量等级，取中间值；否则取第一个
+      // qualities数组已按分辨率从低到高排列（360p -> 720p等）
+      const middleIndex = Math.floor(qualities.length / 2);
+      const quality = qualities[middleIndex] || qualities[0];
+      
+      await new Promise((resolve, reject) => {
+        ffmpeg(inputPath)
+          .videoCodec('libx264')
+          .audioCodec('aac')
+          .size(`?x${quality.height}`)
+          .videoBitrate(`${quality.bitrate}k`)
+          .audioChannels(2)
+          .audioBitrate('128k')
+          .outputOptions([
+            `-maxrate ${quality.maxrate}k`,
+            `-bufsize ${quality.bufsize}k`,
+            '-preset medium',
+            '-profile:v main',
+            '-level 3.1',
+            '-movflags +faststart'
+          ])
+          .on('start', (cmd) => {
+            console.log(`开始简单转码: ${cmd}`);
+          })
+          .on('progress', (progress) => {
+            if (onProgress) onProgress(Math.round(progress.percent || 0));
+          })
+          .on('end', () => {
+            console.log('简单转码完成');
+            resolve();
+          })
+          .on('error', (err) => {
+            reject(err);
+          })
+          .save(singleOutputFile);
+      });
+      
+      // 生成简单的MPD（指向单个MP4文件）
+      await generateSimpleDashManifest(singleOutputFile, mpdPath, videoInfo, quality);
+      
+      // 清理临时文件
+      if (inputPath && fs.existsSync(inputPath) && inputPath.includes(path.join('uploads', 'temp'))) {
+        try {
+          fs.unlinkSync(inputPath);
+        } catch (e) {}
+      }
+      
+      return {
+        success: true,
+        message: '视频转码完成（简单模式）',
+        data: {
+          baseName,
+          mpdPath,
+          outputDir: finalOutputDir,
+          files: [{ quality: quality.label, path: singleOutputFile, bitrate: quality.bitrate }],
+          qualities: [quality.label],
+          retainedOriginal: transcodeConfig.retainOriginal
+        }
+      };
+    }
   } catch (error) {
     console.error('视频转码失败:', error);
     return {
@@ -607,38 +732,6 @@ async function transcodeToDash(inputPath, outputDir, options = {}) {
 }
 
 /**
- * 生成 DASH MPD 清单文件
- * @param {Array} files - 转码后的文件列表
- * @param {string} mpdPath - MPD 文件路径
- * @param {Object} videoInfo - 视频信息
- */
-async function generateDashManifest(files, mpdPath, videoInfo) {
-  const duration = videoInfo.duration || 0;
-  const durationStr = formatDuration(duration);
-  
-  let representations = '';
-  files.forEach((file, index) => {
-    const fileName = path.basename(file.path);
-    representations += `
-      <Representation id="${index}" mimeType="video/mp4" codecs="avc1.4d401f,mp4a.40.2" bandwidth="${file.bitrate * 1000}">
-        <BaseURL>${fileName}</BaseURL>
-      </Representation>`;
-  });
-
-  const mpd = `<?xml version="1.0" encoding="UTF-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="${durationStr}" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
-  <Period>
-    <AdaptationSet mimeType="video/mp4" contentType="video">
-      ${representations}
-    </AdaptationSet>
-  </Period>
-</MPD>`;
-
-  fs.writeFileSync(mpdPath, mpd, 'utf8');
-  console.log('DASH MPD 清单已生成:', mpdPath);
-}
-
-/**
  * 格式化时长为 ISO 8601 duration 格式
  * @param {number} seconds - 秒数
  * @returns {string} ISO 8601 duration 字符串
@@ -654,6 +747,42 @@ function formatDuration(seconds) {
   duration += `${secs}S`;
   
   return duration;
+}
+
+/**
+ * 生成简单的DASH MPD清单（用于单个MP4文件回退模式）
+ * Shaka Player可以直接播放普通MP4，此MPD只是提供兼容接口
+ * @param {string} videoPath - 视频文件路径
+ * @param {string} mpdPath - MPD输出路径
+ * @param {Object} videoInfo - 视频信息
+ * @param {Object} quality - 质量信息
+ */
+async function generateSimpleDashManifest(videoPath, mpdPath, videoInfo, quality) {
+  const duration = videoInfo.duration || 0;
+  const durationStr = formatDuration(duration);
+  const fileName = path.basename(videoPath);
+  const width = quality.width || Math.round((quality.height || 720) * 16 / 9);
+  const height = quality.height || 720;
+  
+  // 生成指向单个MP4的简单MPD
+  // 注意：这种方式Shaka Player可能无法完美支持，但可以作为回退
+  const mpd = `<?xml version="1.0" encoding="UTF-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" 
+     type="static" 
+     mediaPresentationDuration="${durationStr}" 
+     minBufferTime="PT2S" 
+     profiles="urn:mpeg:dash:profile:isoff-main:2011">
+  <Period id="0" duration="${durationStr}">
+    <AdaptationSet id="0" contentType="video" mimeType="video/mp4" segmentAlignment="true">
+      <Representation id="0" bandwidth="${quality.bitrate * 1000}" width="${width}" height="${height}" codecs="avc1.4d401f,mp4a.40.2">
+        <BaseURL>${fileName}</BaseURL>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>`;
+
+  fs.writeFileSync(mpdPath, mpd, 'utf8');
+  console.log('简单DASH MPD清单已生成:', mpdPath);
 }
 
 /**
