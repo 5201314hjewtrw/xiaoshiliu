@@ -503,6 +503,7 @@ function getVideoOrientation(width, height) {
 
 /**
  * 生成视频质量配置（支持智能分辨率检测和等比例缩放）
+ * 支持任意分辨率，自动保持原始宽高比，不会变形
  * @param {Object} videoInfo - 视频信息
  * @param {number} minBitrate - 最小码率 (kbps) - 已弃用，使用配置中的码率
  * @param {number} maxBitrate - 最大码率 (kbps) - 已弃用，使用配置中的码率
@@ -512,6 +513,9 @@ function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
   const sourceWidth = videoInfo.width || 1280;
   const sourceHeight = videoInfo.height || 720;
   const sourceBitrate = Math.round((videoInfo.bitrate || 2500000) / 1000); // 转换为kbps
+  
+  // 计算源视频宽高比
+  const sourceAspectRatio = sourceWidth / sourceHeight;
 
   // 获取DASH分辨率配置
   const dashResolutionsConfig = config.ffmpeg?.dashResolutions;
@@ -523,20 +527,18 @@ function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
   const sourceLongSide = sourceOrientation.longSide;
   const isSourcePortrait = sourceOrientation.isPortrait;
 
-  console.log(`源视频信息: ${sourceWidth}x${sourceHeight}, 码率: ${sourceBitrate}kbps, 方向: ${isSourcePortrait ? '竖屏' : '横屏'}`);
+  console.log(`源视频信息: ${sourceWidth}x${sourceHeight}, 宽高比: ${sourceAspectRatio.toFixed(3)}, 码率: ${sourceBitrate}kbps, 方向: ${isSourcePortrait ? '竖屏' : '横屏'}`);
   console.log(`源视频短边: ${sourceShortSide}, 长边: ${sourceLongSide}`);
 
   const qualities = [];
 
   // 遍历配置的分辨率
   for (const resolution of configuredResolutions) {
-    const targetHeight = resolution.height;
-    const targetWidth = resolution.width;
     const targetBitrate = resolution.bitrate;
     
-    // 计算目标分辨率的方向和边长
-    const targetOrientation = getVideoOrientation(targetWidth, targetHeight);
-    const targetShortSide = targetOrientation.shortSide;
+    // 使用配置中的短边作为参考，但根据源视频实际宽高比计算输出尺寸
+    const configOrientation = getVideoOrientation(resolution.width, resolution.height);
+    const targetShortSide = configOrientation.shortSide;
 
     // 使用较短边进行比较（这样720x1280的竖屏视频会匹配720p配置）
     // 如果源视频的短边小于目标分辨率的短边，则跳过此分辨率
@@ -552,33 +554,41 @@ function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
       continue;
     }
 
-    // 根据源视频方向调整输出尺寸
+    // 根据源视频宽高比和目标短边，计算输出尺寸（保持原始宽高比，不变形）
     let outputWidth, outputHeight;
+    
     if (isSourcePortrait) {
-      // 竖屏视频: 保持竖屏，较短边匹配目标短边
-      outputHeight = Math.round(targetShortSide * sourceLongSide / sourceShortSide);
+      // 竖屏视频: 较短边（宽度）匹配目标短边，按比例计算高度
       outputWidth = targetShortSide;
+      outputHeight = Math.round(outputWidth / sourceAspectRatio);
       
-      // 确保输出高度不超过源视频高度
-      if (outputHeight > sourceLongSide) {
-        outputHeight = sourceLongSide;
-        outputWidth = Math.round(outputHeight * sourceShortSide / sourceLongSide);
+      // 确保不超过源视频尺寸
+      if (outputHeight > sourceHeight) {
+        outputHeight = sourceHeight;
+        outputWidth = Math.round(outputHeight * sourceAspectRatio);
       }
     } else {
-      // 横屏视频: 保持横屏，高度匹配目标高度
+      // 横屏视频: 较短边（高度）匹配目标短边，按比例计算宽度
       outputHeight = targetShortSide;
-      outputWidth = Math.round(outputHeight * sourceLongSide / sourceShortSide);
+      outputWidth = Math.round(outputHeight * sourceAspectRatio);
       
-      // 确保输出宽度不超过源视频宽度
-      if (outputWidth > sourceLongSide) {
-        outputWidth = sourceLongSide;
-        outputHeight = Math.round(outputWidth * sourceShortSide / sourceLongSide);
+      // 确保不超过源视频尺寸
+      if (outputWidth > sourceWidth) {
+        outputWidth = sourceWidth;
+        outputHeight = Math.round(outputWidth / sourceAspectRatio);
       }
     }
 
     // 确保尺寸是偶数（H.264编码要求）
     outputWidth = Math.round(outputWidth / 2) * 2;
     outputHeight = Math.round(outputHeight / 2) * 2;
+
+    // 验证最终输出尺寸确实保持了宽高比（允许小误差）
+    const outputAspectRatio = outputWidth / outputHeight;
+    const aspectRatioDiff = Math.abs(outputAspectRatio - sourceAspectRatio);
+    if (aspectRatioDiff > 0.01) {
+      console.warn(`警告: 输出宽高比 ${outputAspectRatio.toFixed(3)} 与源视频 ${sourceAspectRatio.toFixed(3)} 有偏差`);
+    }
 
     qualities.push({
       height: outputHeight,
@@ -589,7 +599,7 @@ function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
       bufsize: Math.round(targetBitrate * 2)
     });
 
-    console.log(`添加分辨率 ${resolution.label}: ${outputWidth}x${outputHeight} @ ${targetBitrate}kbps`);
+    console.log(`添加分辨率 ${resolution.label}: ${outputWidth}x${outputHeight} (宽高比: ${outputAspectRatio.toFixed(3)}) @ ${targetBitrate}kbps`);
   }
 
   // 如果没有合适的分辨率，至少保留一个最低质量
