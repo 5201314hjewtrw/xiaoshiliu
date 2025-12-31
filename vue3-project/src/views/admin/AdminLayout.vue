@@ -165,7 +165,7 @@ const isFilterOpen = ref(false)
 
 // 判断当前页面是否需要显示筛选按钮
 const shouldShowFilter = computed(() => {
-  const noFilterRoutes = ['/admin/api-docs', '/admin/monitor']
+  const noFilterRoutes = ['/admin/api-docs', '/admin/monitor', '/admin/settings']
   return !noFilterRoutes.includes(route.path)
 })
 
@@ -276,9 +276,10 @@ const menuItems = [
   { path: '/admin/collections', title: '收藏管理', icon: 'collect' },
   { path: '/admin/follows', title: '关注管理', icon: 'follow' },
   { path: '/admin/notifications', title: '通知管理', icon: 'notification' },
-  { path: '/admin/sessions', title: '会话管理', icon: 'setting' },
+  { path: '/admin/sessions', title: '会话管理', icon: 'session' },
   { path: '/admin/audit', title: '认证管理', icon: 'verified' },
-  { path: '/admin/admins', title: '管理员管理', icon: 'admin' }
+  { path: '/admin/admins', title: '管理员管理', icon: 'admin' },
+  { path: '/admin/settings', title: '系统设置', icon: 'setting' }
 ]
 
 // 当前页面标题
@@ -303,7 +304,8 @@ const currentPageDescription = computed(() => {
     '/admin/notifications': '管理系统通知消息',
     '/admin/sessions': '管理用户登录会话',
     '/admin/audit': '管理用户认证申请和审核',
-    '/admin/admins': '管理系统管理员账号'
+    '/admin/admins': '管理系统管理员账号',
+    '/admin/settings': '配置视频转码和系统参数'
   }
   return descriptions[route.path]
 })
