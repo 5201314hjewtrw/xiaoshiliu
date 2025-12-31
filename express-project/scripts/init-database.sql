@@ -280,6 +280,28 @@ CREATE TABLE IF NOT EXISTS `points_log` (
   CONSTRAINT `points_log_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='石榴点变动记录表';
 
+-- 18. 系统设置表
+CREATE TABLE IF NOT EXISTS `system_settings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT COMMENT '设置ID',
+  `setting_key` varchar(100) NOT NULL COMMENT '设置键名',
+  `setting_value` text NOT NULL COMMENT '设置值（JSON格式）',
+  `setting_group` varchar(50) NOT NULL DEFAULT 'general' COMMENT '设置分组',
+  `description` varchar(255) DEFAULT NULL COMMENT '设置描述',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_setting_key` (`setting_key`),
+  KEY `idx_setting_group` (`setting_group`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统设置表';
+
+-- 插入默认视频转码设置
+INSERT INTO `system_settings` (`setting_key`, `setting_value`, `setting_group`, `description`) VALUES 
+('video_transcode_enabled', 'false', 'video', '是否启用视频转码'),
+('video_transcode_min_bitrate', '500', 'video', '视频转码最小码率(kbps)'),
+('video_transcode_max_bitrate', '2500', 'video', '视频转码最大码率(kbps)'),
+('video_transcode_format', 'dash', 'video', '视频转码格式(dash/hls)')
+ON DUPLICATE KEY UPDATE `setting_key` = VALUES(`setting_key`);
+
 -- 插入默认管理员账户
 -- 密码: 123456
 INSERT INTO `admin` (`username`, `password`) VALUES 

@@ -31,6 +31,7 @@ const statsRoutes = require('./routes/stats');
 const adminRoutes = require('./routes/admin');
 const categoriesRoutes = require('./routes/categories');
 const balanceRoutes = require('./routes/balance');
+const settingsRoutes = require('./routes/settings');
 
 const app = express();
 
@@ -78,6 +79,7 @@ app.use('/api/stats', statsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/balance', balanceRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // 错误处理中间件
 app.use((err, req, res, next) => {
