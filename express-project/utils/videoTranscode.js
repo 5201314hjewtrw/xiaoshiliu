@@ -413,43 +413,198 @@ function getVideoInfo(inputPath) {
 }
 
 /**
- * 生成视频质量配置
+ * 解析DASH分辨率配置
+ * 支持两种格式:
+ * 1. 宽x高:码率 (例如: 1920x1080:5000)
+ * 2. 高度p:码率 (例如: 1080p:5000，自动使用16:9宽高比)
+ * @param {string} dashResolutionsConfig - DASH分辨率配置字符串
+ * @returns {Array} 解析后的分辨率配置数组
+ */
+function parseDashResolutions(dashResolutionsConfig) {
+  if (!dashResolutionsConfig) {
+    // 默认配置
+    return [
+      { height: 360, width: 640, bitrate: 500, label: '360p' },
+      { height: 480, width: 854, bitrate: 1000, label: '480p' },
+      { height: 720, width: 1280, bitrate: 2500, label: '720p' },
+      { height: 1080, width: 1920, bitrate: 5000, label: '1080p' }
+    ];
+  }
+
+  const resolutions = [];
+  const items = dashResolutionsConfig.split(',').map(s => s.trim()).filter(s => s);
+
+  for (const item of items) {
+    const parts = item.split(':');
+    if (parts.length !== 2) continue;
+
+    const bitrateStr = parts[1].trim();
+    const bitrate = parseInt(bitrateStr, 10);
+    if (isNaN(bitrate)) continue;
+
+    const dimensionStr = parts[0].trim();
+    
+    // 检查是否是 "高度p" 格式
+    if (dimensionStr.endsWith('p')) {
+      const height = parseInt(dimensionStr.slice(0, -1), 10);
+      if (isNaN(height)) continue;
+      
+      // 使用16:9宽高比计算宽度
+      const width = Math.round(height * 16 / 9);
+      resolutions.push({
+        height,
+        width,
+        bitrate,
+        label: `${height}p`
+      });
+    } else {
+      // 检查是否是 "宽x高" 格式
+      const dimensions = dimensionStr.split('x');
+      if (dimensions.length !== 2) continue;
+
+      const width = parseInt(dimensions[0], 10);
+      const height = parseInt(dimensions[1], 10);
+      if (isNaN(width) || isNaN(height)) continue;
+
+      resolutions.push({
+        height,
+        width,
+        bitrate,
+        label: `${height}p`
+      });
+    }
+  }
+
+  // 按高度排序（从低到高）
+  resolutions.sort((a, b) => a.height - b.height);
+  
+  return resolutions.length > 0 ? resolutions : [
+    { height: 360, width: 640, bitrate: 500, label: '360p' },
+    { height: 480, width: 854, bitrate: 1000, label: '480p' },
+    { height: 720, width: 1280, bitrate: 2500, label: '720p' },
+    { height: 1080, width: 1920, bitrate: 5000, label: '1080p' }
+  ];
+}
+
+/**
+ * 根据视频方向确定较短边和较长边
+ * @param {number} width - 视频宽度
+ * @param {number} height - 视频高度
+ * @returns {Object} { shortSide, longSide, isPortrait }
+ */
+function getVideoOrientation(width, height) {
+  const isPortrait = height > width;
+  return {
+    shortSide: isPortrait ? width : height,
+    longSide: isPortrait ? height : width,
+    isPortrait
+  };
+}
+
+/**
+ * 生成视频质量配置（支持智能分辨率检测和等比例缩放）
  * @param {Object} videoInfo - 视频信息
- * @param {number} minBitrate - 最小码率 (kbps)
- * @param {number} maxBitrate - 最大码率 (kbps)
+ * @param {number} minBitrate - 最小码率 (kbps) - 已弃用，使用配置中的码率
+ * @param {number} maxBitrate - 最大码率 (kbps) - 已弃用，使用配置中的码率
  * @returns {Array} 质量配置数组
  */
 function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
+  const sourceWidth = videoInfo.width || 1280;
   const sourceHeight = videoInfo.height || 720;
+  const sourceBitrate = Math.round((videoInfo.bitrate || 2500000) / 1000); // 转换为kbps
+
+  // 获取DASH分辨率配置
+  const dashResolutionsConfig = config.ffmpeg?.dashResolutions;
+  const configuredResolutions = parseDashResolutions(dashResolutionsConfig);
+
+  // 确定源视频的方向
+  const sourceOrientation = getVideoOrientation(sourceWidth, sourceHeight);
+  const sourceShortSide = sourceOrientation.shortSide;
+  const sourceLongSide = sourceOrientation.longSide;
+  const isSourcePortrait = sourceOrientation.isPortrait;
+
+  console.log(`源视频信息: ${sourceWidth}x${sourceHeight}, 码率: ${sourceBitrate}kbps, 方向: ${isSourcePortrait ? '竖屏' : '横屏'}`);
+  console.log(`源视频短边: ${sourceShortSide}, 长边: ${sourceLongSide}`);
+
   const qualities = [];
 
-  // 根据源视频分辨率生成多个质量等级
-  const qualityPresets = [
-    { height: 360, label: '360p' },
-    { height: 480, label: '480p' },
-    { height: 720, label: '720p' },
-    { height: 1080, label: '1080p' }
-  ];
+  // 遍历配置的分辨率
+  for (const resolution of configuredResolutions) {
+    const targetHeight = resolution.height;
+    const targetWidth = resolution.width;
+    const targetBitrate = resolution.bitrate;
+    
+    // 计算目标分辨率的方向和边长
+    const targetOrientation = getVideoOrientation(targetWidth, targetHeight);
+    const targetShortSide = targetOrientation.shortSide;
 
-  // 只生成不超过源视频分辨率的质量等级
-  const validPresets = qualityPresets.filter(q => q.height <= sourceHeight);
-  
-  if (validPresets.length === 0) {
-    validPresets.push(qualityPresets[0]); // 至少保留360p
+    // 使用较短边进行比较（这样720x1280的竖屏视频会匹配720p配置）
+    // 如果源视频的短边小于目标分辨率的短边，则跳过此分辨率
+    if (sourceShortSide < targetShortSide) {
+      console.log(`跳过 ${resolution.label}: 源视频短边 ${sourceShortSide} < 目标短边 ${targetShortSide}`);
+      continue;
+    }
+
+    // 检查源视频码率是否足够支持目标码率
+    // 如果源视频码率低于目标码率的80%，跳过此分辨率
+    if (sourceBitrate < targetBitrate * 0.8) {
+      console.log(`跳过 ${resolution.label}: 源码率 ${sourceBitrate}kbps 不足以支持目标码率 ${targetBitrate}kbps`);
+      continue;
+    }
+
+    // 根据源视频方向调整输出尺寸
+    let outputWidth, outputHeight;
+    if (isSourcePortrait) {
+      // 竖屏视频: 保持竖屏，较短边匹配目标短边
+      outputHeight = Math.round(targetShortSide * sourceLongSide / sourceShortSide);
+      outputWidth = targetShortSide;
+      
+      // 确保输出高度不超过源视频高度
+      if (outputHeight > sourceLongSide) {
+        outputHeight = sourceLongSide;
+        outputWidth = Math.round(outputHeight * sourceShortSide / sourceLongSide);
+      }
+    } else {
+      // 横屏视频: 保持横屏，高度匹配目标高度
+      outputHeight = targetShortSide;
+      outputWidth = Math.round(outputHeight * sourceLongSide / sourceShortSide);
+      
+      // 确保输出宽度不超过源视频宽度
+      if (outputWidth > sourceLongSide) {
+        outputWidth = sourceLongSide;
+        outputHeight = Math.round(outputWidth * sourceShortSide / sourceLongSide);
+      }
+    }
+
+    // 确保尺寸是偶数（H.264编码要求）
+    outputWidth = Math.round(outputWidth / 2) * 2;
+    outputHeight = Math.round(outputHeight / 2) * 2;
+
+    qualities.push({
+      height: outputHeight,
+      width: outputWidth,
+      label: resolution.label,
+      bitrate: targetBitrate,
+      maxrate: Math.round(targetBitrate * 1.2),
+      bufsize: Math.round(targetBitrate * 2)
+    });
+
+    console.log(`添加分辨率 ${resolution.label}: ${outputWidth}x${outputHeight} @ ${targetBitrate}kbps`);
   }
 
-  const bitrateStep = (maxBitrate - minBitrate) / Math.max(validPresets.length - 1, 1);
-
-  validPresets.forEach((preset, index) => {
-    const bitrate = Math.round(minBitrate + bitrateStep * index);
+  // 如果没有合适的分辨率，至少保留一个最低质量
+  if (qualities.length === 0) {
+    console.log('没有合适的目标分辨率，使用源视频尺寸和较低码率');
+    const fallbackBitrate = Math.min(sourceBitrate, 1000);
     qualities.push({
-      height: preset.height,
-      label: preset.label,
-      bitrate: bitrate,
-      maxrate: Math.round(bitrate * 1.2),
-      bufsize: Math.round(bitrate * 2)
+      height: sourceHeight,
+      width: sourceWidth,
+      label: `${sourceOrientation.shortSide}p`,
+      bitrate: fallbackBitrate,
+      maxrate: Math.round(fallbackBitrate * 1.2),
+      bufsize: Math.round(fallbackBitrate * 2)
     });
-  });
+  }
 
   return qualities;
 }
@@ -514,8 +669,8 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
     
     // 为每个质量等级创建输出流
     qualities.forEach((quality, index) => {
-      // 缩放滤镜
-      filterComplex.push(`[0:v]scale=-2:${quality.height}[v${index}]`);
+      // 缩放滤镜 - 使用精确的宽度和高度
+      filterComplex.push(`[0:v]scale=${quality.width}:${quality.height}[v${index}]`);
       
       // 视频流映射
       maps.push(`-map [v${index}]`);
@@ -590,8 +745,8 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
       const transcodedFiles = qualities.map((quality, index) => ({
         quality: quality.label,
         height: quality.height,
-        bitrate: quality.bitrate,
-        width: Math.round(quality.height * 16 / 9)
+        width: quality.width,
+        bitrate: quality.bitrate
       }));
 
     // 清理临时输入文件（始终清理temp目录中的文件）
@@ -638,7 +793,7 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
         ffmpeg(inputPath)
           .videoCodec('libx264')
           .audioCodec('aac')
-          .size(`?x${quality.height}`)
+          .size(`${quality.width}x${quality.height}`)
           .videoBitrate(`${quality.bitrate}k`)
           .audioChannels(2)
           .audioBitrate('128k')
