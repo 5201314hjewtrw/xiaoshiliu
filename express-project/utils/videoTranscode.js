@@ -412,6 +412,16 @@ function getVideoInfo(inputPath) {
   });
 }
 
+// 视频转码配置常量
+const TRANSCODE_DEFAULTS = {
+  DEFAULT_WIDTH: 1280,
+  DEFAULT_HEIGHT: 720,
+  DEFAULT_BITRATE: 2500000, // bps
+  MIN_BITRATE_THRESHOLD: 0.8, // 源视频码率必须达到目标码率的80%
+  ASPECT_RATIO_TOLERANCE: 0.01, // 宽高比允许的最大偏差
+  FALLBACK_BITRATE: 1000 // kbps，当没有合适分辨率时的回退码率
+};
+
 /**
  * 解析DASH分辨率配置
  * 支持两种格式:
@@ -510,9 +520,9 @@ function getVideoOrientation(width, height) {
  * @returns {Array} 质量配置数组
  */
 function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
-  const sourceWidth = videoInfo.width || 1280;
-  const sourceHeight = videoInfo.height || 720;
-  const sourceBitrate = Math.round((videoInfo.bitrate || 2500000) / 1000); // 转换为kbps
+  const sourceWidth = videoInfo.width || TRANSCODE_DEFAULTS.DEFAULT_WIDTH;
+  const sourceHeight = videoInfo.height || TRANSCODE_DEFAULTS.DEFAULT_HEIGHT;
+  const sourceBitrate = Math.round((videoInfo.bitrate || TRANSCODE_DEFAULTS.DEFAULT_BITRATE) / 1000); // 转换为kbps
   
   // 计算源视频宽高比
   const sourceAspectRatio = sourceWidth / sourceHeight;
@@ -548,8 +558,8 @@ function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
     }
 
     // 检查源视频码率是否足够支持目标码率
-    // 如果源视频码率低于目标码率的80%，跳过此分辨率
-    if (sourceBitrate < targetBitrate * 0.8) {
+    // 如果源视频码率低于目标码率的指定阈值，跳过此分辨率
+    if (sourceBitrate < targetBitrate * TRANSCODE_DEFAULTS.MIN_BITRATE_THRESHOLD) {
       console.log(`跳过 ${resolution.label}: 源码率 ${sourceBitrate}kbps 不足以支持目标码率 ${targetBitrate}kbps`);
       continue;
     }
@@ -586,7 +596,7 @@ function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
     // 验证最终输出尺寸确实保持了宽高比（允许小误差）
     const outputAspectRatio = outputWidth / outputHeight;
     const aspectRatioDiff = Math.abs(outputAspectRatio - sourceAspectRatio);
-    if (aspectRatioDiff > 0.01) {
+    if (aspectRatioDiff > TRANSCODE_DEFAULTS.ASPECT_RATIO_TOLERANCE) {
       console.warn(`警告: 输出宽高比 ${outputAspectRatio.toFixed(3)} 与源视频 ${sourceAspectRatio.toFixed(3)} 有偏差`);
     }
 
@@ -605,7 +615,7 @@ function generateQualityLevels(videoInfo, minBitrate, maxBitrate) {
   // 如果没有合适的分辨率，至少保留一个最低质量
   if (qualities.length === 0) {
     console.log('没有合适的目标分辨率，使用源视频尺寸和较低码率');
-    const fallbackBitrate = Math.min(sourceBitrate, 1000);
+    const fallbackBitrate = Math.min(sourceBitrate, TRANSCODE_DEFAULTS.FALLBACK_BITRATE);
     qualities.push({
       height: sourceHeight,
       width: sourceWidth,
@@ -679,8 +689,15 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
     
     // 为每个质量等级创建输出流
     qualities.forEach((quality, index) => {
+      // 验证尺寸是正整数（防止命令注入）
+      const width = Math.max(1, Math.floor(Math.abs(quality.width)));
+      const height = Math.max(1, Math.floor(Math.abs(quality.height)));
+      const bitrate = Math.max(1, Math.floor(Math.abs(quality.bitrate)));
+      const maxrate = Math.max(1, Math.floor(Math.abs(quality.maxrate)));
+      const bufsize = Math.max(1, Math.floor(Math.abs(quality.bufsize)));
+      
       // 缩放滤镜 - 使用精确的宽度和高度
-      filterComplex.push(`[0:v]scale=${quality.width}:${quality.height}[v${index}]`);
+      filterComplex.push(`[0:v]scale=${width}:${height}[v${index}]`);
       
       // 视频流映射
       maps.push(`-map [v${index}]`);
@@ -688,9 +705,9 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
       
       // 每个流的编码参数
       outputOptions.push(`-c:v:${index} libx264`);
-      outputOptions.push(`-b:v:${index} ${quality.bitrate}k`);
-      outputOptions.push(`-maxrate:v:${index} ${quality.maxrate}k`);
-      outputOptions.push(`-bufsize:v:${index} ${quality.bufsize}k`);
+      outputOptions.push(`-b:v:${index} ${bitrate}k`);
+      outputOptions.push(`-maxrate:v:${index} ${maxrate}k`);
+      outputOptions.push(`-bufsize:v:${index} ${bufsize}k`);
       outputOptions.push(`-profile:v:${index} main`);
       outputOptions.push(`-level:v:${index} 3.1`);
     });
@@ -799,17 +816,24 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
       const middleIndex = Math.floor(qualities.length / 2);
       const quality = qualities[middleIndex] || qualities[0];
       
+      // 验证尺寸和码率是正整数（防止命令注入）
+      const width = Math.max(1, Math.floor(Math.abs(quality.width)));
+      const height = Math.max(1, Math.floor(Math.abs(quality.height)));
+      const bitrate = Math.max(1, Math.floor(Math.abs(quality.bitrate)));
+      const maxrate = Math.max(1, Math.floor(Math.abs(quality.maxrate)));
+      const bufsize = Math.max(1, Math.floor(Math.abs(quality.bufsize)));
+      
       await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
           .videoCodec('libx264')
           .audioCodec('aac')
-          .size(`${quality.width}x${quality.height}`)
-          .videoBitrate(`${quality.bitrate}k`)
+          .size(`${width}x${height}`)
+          .videoBitrate(`${bitrate}k`)
           .audioChannels(2)
           .audioBitrate('128k')
           .outputOptions([
-            `-maxrate ${quality.maxrate}k`,
-            `-bufsize ${quality.bufsize}k`,
+            `-maxrate ${maxrate}k`,
+            `-bufsize ${bufsize}k`,
             '-preset medium',
             '-profile:v main',
             '-level 3.1',
