@@ -3069,7 +3069,9 @@ function handleAvatarError(event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-color-secondary);
+  background: #000;
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 .video-player {
@@ -3085,11 +3087,24 @@ function handleAvatarError(event) {
   width: 100%;
   height: 100%;
   max-width: 1000px;
+  border-radius: inherit;
+  background: #000;
+  overflow: hidden;
+}
+
+.shaka-video-player :deep(.shaka-player-container) {
+  border-radius: inherit;
+}
+
+.shaka-video-player :deep(.shaka-video) {
+  border-radius: inherit;
 }
 
 .mobile-shaka-player {
   width: 100%;
   height: 100%;
+  background: #000;
+  border-radius: 0;
 }
 
 /* 转码状态覆盖层 */
@@ -4477,7 +4492,7 @@ function handleAvatarError(event) {
     min-height: 200px;
     margin-bottom: 16px;
     position: relative;
-    background: var(--bg-color-secondary);
+    background: #000;
     overflow: hidden;
     align-items: center;
     justify-content: center;
@@ -4488,6 +4503,12 @@ function handleAvatarError(event) {
     height: 100%;
     max-width: 1000px;
     object-fit: contain;
+    background: #000;
+  }
+
+  .mobile-shaka-player {
+    width: 100%;
+    height: 100%;
     background: #000;
   }
 

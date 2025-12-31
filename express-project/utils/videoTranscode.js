@@ -462,7 +462,7 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
     const timestamp = Date.now();
     const baseName = `video_${timestamp}_${hash}`;
     
-    // 转码为各个质量等级
+    // 转码为各个质量等级（生成DASH兼容的分片MP4）
     const transcodedFiles = [];
     const transcodeErrors = [];
     const totalQualities = qualities.length;
@@ -478,13 +478,21 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
             .audioCodec('aac')
             .size(`?x${quality.height}`)
             .videoBitrate(`${quality.bitrate}k`)
+            .audioChannels(2)
+            .audioBitrate('128k')
             .outputOptions([
               `-maxrate ${quality.maxrate}k`,
               `-bufsize ${quality.bufsize}k`,
               '-preset medium',
               '-profile:v main',
               '-level 3.1',
-              '-movflags +faststart'
+              // 使用frag_keyframe和empty_moov生成DASH兼容的分片MP4
+              '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+              // 设置关键帧间隔为2秒（假设30fps）
+              '-g', '60',
+              '-keyint_min', '60',
+              // 场景变化检测
+              '-sc_threshold', '0'
             ])
             .on('start', (cmd) => {
               console.log(`开始转码 ${quality.label}: ${cmd}`);
@@ -495,13 +503,26 @@ async function transcodeToDashInternal(inputPath, outputDir, options = {}, onPro
               console.log(`转码进度 ${quality.label}: ${Math.round(progress.percent || 0)}%`);
               if (onProgress) onProgress(Math.round(overallProgress));
             })
-            .on('end', () => {
+            .on('end', async () => {
               console.log(`转码完成 ${quality.label}`);
               completedQualities++;
+              
+              // 获取生成文件的实际信息用于MPD
+              let fileInfo = { width: 0, height: quality.height };
+              try {
+                const info = await getVideoInfo(outputFile);
+                fileInfo.width = info.width || Math.round(quality.height * 16 / 9);
+                fileInfo.height = info.height || quality.height;
+              } catch (e) {
+                fileInfo.width = Math.round(quality.height * 16 / 9);
+              }
+              
               transcodedFiles.push({
                 quality: quality.label,
                 path: outputFile,
-                bitrate: quality.bitrate
+                bitrate: quality.bitrate,
+                width: fileInfo.width,
+                height: fileInfo.height
               });
               if (onProgress) onProgress(Math.round((completedQualities / totalQualities) * 100));
               resolve();
@@ -616,20 +637,34 @@ async function generateDashManifest(files, mpdPath, videoInfo) {
   const duration = videoInfo.duration || 0;
   const durationStr = formatDuration(duration);
   
-  let representations = '';
-  files.forEach((file, index) => {
+  // 按分辨率排序（从高到低）
+  const sortedFiles = [...files].sort((a, b) => (b.height || 0) - (a.height || 0));
+  
+  // 生成视频表示
+  let videoRepresentations = '';
+  sortedFiles.forEach((file, index) => {
     const fileName = path.basename(file.path);
-    representations += `
-      <Representation id="${index}" mimeType="video/mp4" codecs="avc1.4d401f,mp4a.40.2" bandwidth="${file.bitrate * 1000}">
-        <BaseURL>${fileName}</BaseURL>
-      </Representation>`;
+    const width = file.width || Math.round((file.height || 720) * 16 / 9);
+    const height = file.height || 720;
+    
+    videoRepresentations += `
+        <Representation id="video_${index}" bandwidth="${file.bitrate * 1000}" width="${width}" height="${height}" codecs="avc1.4d401f" frameRate="30">
+          <BaseURL>${fileName}</BaseURL>
+        </Representation>`;
   });
 
+  // 生成MPD - 使用isoff-live profile更兼容分片MP4
   const mpd = `<?xml version="1.0" encoding="UTF-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="${durationStr}" minBufferTime="PT2S" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011">
-  <Period>
-    <AdaptationSet mimeType="video/mp4" contentType="video">
-      ${representations}
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" 
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:schemaLocation="urn:mpeg:dash:schema:mpd:2011 DASH-MPD.xsd"
+     type="static" 
+     mediaPresentationDuration="${durationStr}" 
+     minBufferTime="PT1.5S" 
+     profiles="urn:mpeg:dash:profile:isoff-live:2011">
+  <Period id="0" duration="${durationStr}">
+    <AdaptationSet id="0" mimeType="video/mp4" contentType="video" segmentAlignment="true" bitstreamSwitching="true" startWithSAP="1">
+      ${videoRepresentations}
     </AdaptationSet>
   </Period>
 </MPD>`;
