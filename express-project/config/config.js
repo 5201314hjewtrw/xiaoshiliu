@@ -18,12 +18,14 @@ require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
  * @returns {number} 字节数
  */
 function parseSizeToBytes(sizeStr) {
+  const DEFAULT_MAX_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
+  
   if (typeof sizeStr === 'number') {
     return sizeStr;
   }
   
   if (typeof sizeStr !== 'string') {
-    return 100 * 1024 * 1024; // 默认 100MB
+    return DEFAULT_MAX_SIZE_BYTES;
   }
   
   const units = {
@@ -35,7 +37,7 @@ function parseSizeToBytes(sizeStr) {
   
   const match = sizeStr.toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)?$/);
   if (!match) {
-    return 100 * 1024 * 1024; // 默认 100MB
+    return DEFAULT_MAX_SIZE_BYTES;
   }
   
   const value = parseFloat(match[1]);

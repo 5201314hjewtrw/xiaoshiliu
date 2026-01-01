@@ -138,7 +138,7 @@ onMounted(async () => {
       serverMaxSize.value = config.maxFileSize
     }
   } catch (error) {
-    console.warn('获取服务器视频配置失败，使用默认配置:', error)
+    console.warn('Failed to get server video config, using default config:', error)
   }
 })
 
