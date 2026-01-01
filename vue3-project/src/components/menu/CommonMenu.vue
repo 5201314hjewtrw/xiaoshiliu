@@ -4,7 +4,6 @@ import DropdownDivider from '@/components/menu/DropdownDivider.vue'
 import ThemeSwitcherMenuItem from '@/components/menu/ThemeSwitcherMenuItem.vue'
 import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
-import { useAboutStore } from '@/stores/about'
 import { useKeyboardShortcutsStore } from '@/stores/keyboardShortcuts'
 import { useAccountSecurityStore } from '@/stores/accountSecurity'
 import { useBalanceStore } from '@/stores/balance'
@@ -13,7 +12,6 @@ import { onMounted } from 'vue'
 
 const userStore = useUserStore()
 const authStore = useAuthStore()
-const aboutStore = useAboutStore()
 const keyboardShortcutsStore = useKeyboardShortcutsStore()
 const accountSecurityStore = useAccountSecurityStore()
 const balanceStore = useBalanceStore()
@@ -36,9 +34,7 @@ const handleLogout = async () => {
 
 // 菜单项点击处理
 const handleMenuClick = (action) => {
-  if (action === 'about') {
-    aboutStore.openAboutModal()
-  } else if (action === 'logout') {
+  if (action === 'logout') {
     handleLogout()
   } else if (action === 'login') {
     handleLoginClick()
@@ -59,9 +55,6 @@ onMounted(() => {
 
 <template>
 
-  <DropdownItem @click="handleMenuClick('about')">
-    关于小石榴
-  </DropdownItem>
   <DropdownItem @click="handleMenuClick('keyboardShortcuts')">
     键盘快捷键
   </DropdownItem>
