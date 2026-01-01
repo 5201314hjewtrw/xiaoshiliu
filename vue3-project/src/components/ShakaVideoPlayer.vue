@@ -616,16 +616,28 @@ const selectLowestBitrateTrack = () => {
     
     // 如果最低码率轨道不是当前轨道，则切换
     if (lowestBitrateTrack && !lowestBitrateTrack.active) {
-      // 暂时禁用ABR，选择低码率轨道，然后重新启用ABR
+      // 暂时禁用ABR，选择低码率轨道
       player.configure({ abr: { enabled: false } })
       player.selectVariantTrack(lowestBitrateTrack, true)
       
-      // 延迟重新启用ABR，让播放器有时间切换
-      setTimeout(() => {
+      // 使用一次性事件监听器来在轨道切换完成后重新启用ABR
+      const reEnableAbr = () => {
         if (player && props.adaptiveBitrate) {
           player.configure({ abr: { enabled: true } })
+          player.removeEventListener('adaptation', reEnableAbr)
         }
-      }, 2000)
+      }
+      
+      // 监听adaptation事件，当轨道切换完成后重新启用ABR
+      player.addEventListener('adaptation', reEnableAbr)
+      
+      // 备用：如果3秒内没有触发adaptation事件，也重新启用ABR
+      setTimeout(() => {
+        if (player && props.adaptiveBitrate) {
+          player.removeEventListener('adaptation', reEnableAbr)
+          player.configure({ abr: { enabled: true } })
+        }
+      }, 3000)
       
       console.log('已选择低码率轨道:', lowestBitrateTrack.bandwidth, 'bps')
     }
@@ -690,14 +702,19 @@ const setupVideoListeners = () => {
     emit('ended')
   })
 
+  // 上次更新码率的时间戳
+  let lastBitrateUpdateTime = 0
+
   videoElement.value.addEventListener('timeupdate', () => {
     currentTime.value = videoElement.value.currentTime
     duration.value = videoElement.value.duration
     playedPercent.value = (currentTime.value / duration.value) * 100 || 0
     
-    // 定期更新码率信息
-    if (Math.floor(currentTime.value) % 5 === 0) {
+    // 定期更新码率信息 - 每5秒更新一次，避免频繁更新
+    const now = Date.now()
+    if (now - lastBitrateUpdateTime >= 5000) {
       updateBitrateInfo()
+      lastBitrateUpdateTime = now
     }
   })
 
