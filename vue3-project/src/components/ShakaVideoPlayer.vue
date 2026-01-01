@@ -719,42 +719,51 @@ const selectLowestBitrateTrack = () => {
 // 右键菜单相关
 const showContextMenu = (event) => {
   event.preventDefault()
+  event.stopPropagation()
   
   // 更新码率信息
   updateBitrateInfo()
   
-  // 计算菜单位置，确保不超出视频容器边界
-  const containerRect = videoContainer.value.getBoundingClientRect()
-  let x = event.clientX - containerRect.left
-  let y = event.clientY - containerRect.top
+  // 使用屏幕坐标 (因为菜单使用 position: fixed)
+  let x = event.clientX
+  let y = event.clientY
   
-  // 限制菜单在容器内 (增加菜单高度估计以适应更多信息)
+  // 限制菜单在窗口内
   const menuWidth = 250
-  const menuHeight = 320
+  const menuHeight = 350
   
-  if (x + menuWidth > containerRect.width) {
-    x = containerRect.width - menuWidth - 10
+  // 确保菜单不会超出右边界
+  if (x + menuWidth > window.innerWidth) {
+    x = window.innerWidth - menuWidth - 10
   }
-  if (y + menuHeight > containerRect.height) {
-    y = containerRect.height - menuHeight - 10
+  // 确保菜单不会超出底部
+  if (y + menuHeight > window.innerHeight) {
+    y = window.innerHeight - menuHeight - 10
   }
   
-  // 确保菜单不会超出顶部
+  // 确保菜单不会超出顶部或左侧
   y = Math.max(10, y)
   x = Math.max(10, x)
   
   contextMenuPosition.value = { x, y }
   contextMenuVisible.value = true
   
-  // 点击其他地方关闭菜单
-  document.addEventListener('click', hideContextMenu)
-  document.addEventListener('contextmenu', hideContextMenu)
+  // 点击其他地方关闭菜单 (使用 setTimeout 确保不会立即触发)
+  setTimeout(() => {
+    document.addEventListener('click', hideContextMenu)
+    document.addEventListener('contextmenu', hideContextMenuOnRightClick)
+  }, 0)
+}
+
+const hideContextMenuOnRightClick = (event) => {
+  // 如果右键点击在菜单外，关闭菜单但不阻止新菜单显示
+  hideContextMenu()
 }
 
 const hideContextMenu = () => {
   contextMenuVisible.value = false
   document.removeEventListener('click', hideContextMenu)
-  document.removeEventListener('contextmenu', hideContextMenu)
+  document.removeEventListener('contextmenu', hideContextMenuOnRightClick)
 }
 
 // 视频事件监听
@@ -994,7 +1003,7 @@ defineExpose({
 
 /* 右键菜单样式 */
 .context-menu {
-  position: absolute;
+  position: fixed;
   background: rgba(24, 24, 24, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 8px;
@@ -1002,7 +1011,7 @@ defineExpose({
   min-width: 240px;
   max-height: 400px;
   overflow-y: auto;
-  z-index: 9999;
+  z-index: 99999;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(12px);
   animation: fadeInScale 0.15s ease-out;
