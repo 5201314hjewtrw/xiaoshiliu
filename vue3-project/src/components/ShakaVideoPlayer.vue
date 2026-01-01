@@ -297,9 +297,9 @@ const initPlayer = async () => {
     // 优化配置以提升DASH播放流畅度，优先使用低码率（约500kbps）
     player.configure({
       streaming: {
-        bufferingGoal: 30,           // 缓冲目标（秒）
+        bufferingGoal: 16,            // 缓冲目标（秒）- 约2个8秒切片
         rebufferingGoal: 5,           // 重新缓冲目标（秒）- 降低以更快恢复播放
-        bufferBehind: 30,             // 保留后面的缓冲（秒）
+        bufferBehind: 16,             // 保留后面的缓冲（秒）- 与bufferingGoal保持一致
         retryParameters: {
           timeout: 30000,             // 请求超时（毫秒）
           maxAttempts: 3,             // 最大重试次数
