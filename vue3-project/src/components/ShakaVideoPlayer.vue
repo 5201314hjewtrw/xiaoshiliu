@@ -1,6 +1,6 @@
 <template>
   <div class="shaka-video-player" :class="{ 'fullscreen': isFullscreen }">
-    <div ref="videoContainer" class="video-container">
+    <div ref="videoContainer" class="video-container" @contextmenu.prevent="showContextMenu">
       <video
         ref="videoElement"
         :poster="posterUrl"
@@ -18,6 +18,11 @@
       
       <!-- 自定义控制栏 -->
       <div v-if="showControls" class="custom-controls" :class="{ 'visible': controlsVisible || !isPlaying }">
+        <!-- 当前码率显示 -->
+        <div v-if="currentBitrateDisplay" class="bitrate-indicator">
+          {{ currentBitrateDisplay }}
+        </div>
+        
         <!-- 播放/暂停按钮 -->
         <div class="controls-row">
           <button 
@@ -82,6 +87,32 @@
           <button @click="toggleFullscreen" class="control-btn fullscreen-btn">
             <SvgIcon :name="isFullscreen ? 'fullscreen-exit' : 'fullscreen'" width="18" height="18" />
           </button>
+        </div>
+      </div>
+
+      <!-- 右键菜单 -->
+      <div 
+        v-if="contextMenuVisible" 
+        class="context-menu"
+        :style="{ left: contextMenuPosition.x + 'px', top: contextMenuPosition.y + 'px' }"
+        @click.stop
+      >
+        <div class="context-menu-header">视频详细信息</div>
+        <div class="context-menu-item">
+          <span class="context-menu-label">当前码率:</span>
+          <span class="context-menu-value">{{ currentBitrateDisplay || '未知' }}</span>
+        </div>
+        <div class="context-menu-item">
+          <span class="context-menu-label">分辨率:</span>
+          <span class="context-menu-value">{{ currentResolution || '未知' }}</span>
+        </div>
+        <div class="context-menu-item">
+          <span class="context-menu-label">缓冲进度:</span>
+          <span class="context-menu-value">{{ Math.round(bufferedPercent) }}%</span>
+        </div>
+        <div class="context-menu-item">
+          <span class="context-menu-label">播放进度:</span>
+          <span class="context-menu-value">{{ formatTime(currentTime) }} / {{ formatTime(duration) }}</span>
         </div>
       </div>
 
@@ -182,6 +213,24 @@ const isFullscreen = ref(false)
 const controlsVisible = ref(true)
 const showQualityMenu = ref(false)
 
+// 右键菜单状态
+const contextMenuVisible = ref(false)
+const contextMenuPosition = ref({ x: 0, y: 0 })
+
+// 码率和分辨率状态
+const currentBitrate = ref(0)
+const currentResolution = ref('')
+
+// 计算当前码率显示文本
+const currentBitrateDisplay = computed(() => {
+  if (!currentBitrate.value) return ''
+  const kbps = Math.round(currentBitrate.value / 1000)
+  if (kbps >= 1000) {
+    return `${(kbps / 1000).toFixed(1)} Mbps`
+  }
+  return `${kbps} kbps`
+})
+
 // 播放状态
 const currentTime = ref(0)
 const duration = ref(0)
@@ -245,11 +294,11 @@ const initPlayer = async () => {
     // 附加到视频元素
     await player.attach(videoElement.value)
 
-    // 优化配置以提升DASH播放流畅度
+    // 优化配置以提升DASH播放流畅度，优先使用低码率（约500kbps）
     player.configure({
       streaming: {
         bufferingGoal: 30,           // 缓冲目标（秒）
-        rebufferingGoal: 10,          // 重新缓冲目标（秒）- 降低以更快恢复播放
+        rebufferingGoal: 5,           // 重新缓冲目标（秒）- 降低以更快恢复播放
         bufferBehind: 30,             // 保留后面的缓冲（秒）
         retryParameters: {
           timeout: 30000,             // 请求超时（毫秒）
@@ -261,15 +310,22 @@ const initPlayer = async () => {
       },
       abr: {
         enabled: props.adaptiveBitrate,
-        defaultBandwidthEstimate: 5000000,  // 默认带宽估计（5Mbps）
-        switchInterval: 8,                   // 切换间隔（秒）
-        bandwidthUpgradeTarget: 0.85,        // 带宽升级目标
-        bandwidthDowngradeTarget: 0.95       // 带宽降级目标
+        defaultBandwidthEstimate: 500000,    // 默认带宽估计改为500kbps，优先尝试低码率
+        switchInterval: 5,                    // 切换间隔（秒）- 减少以更快响应网络变化
+        bandwidthUpgradeTarget: 0.90,         // 带宽升级目标 - 更保守，避免过快升级码率
+        bandwidthDowngradeTarget: 0.70,       // 带宽降级目标 - 更敏感，更快降级以保持流畅
+        restrictions: {
+          minBandwidth: 0,                    // 最小带宽限制
+          maxBandwidth: Infinity              // 最大带宽限制
+        }
       }
     })
 
     // 监听错误
     player.addEventListener('error', onPlayerError)
+    
+    // 监听码率变化事件
+    player.addEventListener('adaptation', onAdaptation)
 
     // 加载视频源
     await player.load(props.src)
@@ -282,7 +338,12 @@ const initPlayer = async () => {
     const useDash = isDashVideo(props.src)
     if (useDash) {
       loadQualities()
+      // 尝试选择最低码率的轨道作为初始轨道
+      selectLowestBitrateTrack()
     }
+    
+    // 更新初始码率信息
+    updateBitrateInfo()
 
     // 设置初始音量
     videoElement.value.volume = volumeLevel.value / 100
@@ -507,6 +568,109 @@ const onPlayerError = (event) => {
   emit('error', event.detail)
 }
 
+// 码率变化事件处理
+const onAdaptation = () => {
+  updateBitrateInfo()
+}
+
+// 更新码率信息
+const updateBitrateInfo = () => {
+  if (!player) return
+  
+  try {
+    const stats = player.getStats()
+    if (stats) {
+      currentBitrate.value = stats.streamBandwidth || 0
+    }
+    
+    // 获取当前播放的轨道信息
+    const tracks = player.getVariantTracks()
+    const activeTrack = tracks.find(track => track.active)
+    if (activeTrack) {
+      currentResolution.value = `${activeTrack.width}x${activeTrack.height}`
+      // 如果没有从stats获取到码率，使用轨道的带宽
+      if (!currentBitrate.value && activeTrack.bandwidth) {
+        currentBitrate.value = activeTrack.bandwidth
+      }
+    }
+  } catch (err) {
+    console.warn('获取码率信息失败:', err)
+  }
+}
+
+// 选择最低码率轨道
+const selectLowestBitrateTrack = () => {
+  if (!player) return
+  
+  try {
+    const tracks = player.getVariantTracks()
+    if (tracks.length === 0) return
+    
+    // 找到码率最低的轨道
+    let lowestBitrateTrack = tracks[0]
+    for (const track of tracks) {
+      if (track.bandwidth < lowestBitrateTrack.bandwidth) {
+        lowestBitrateTrack = track
+      }
+    }
+    
+    // 如果最低码率轨道不是当前轨道，则切换
+    if (lowestBitrateTrack && !lowestBitrateTrack.active) {
+      // 暂时禁用ABR，选择低码率轨道，然后重新启用ABR
+      player.configure({ abr: { enabled: false } })
+      player.selectVariantTrack(lowestBitrateTrack, true)
+      
+      // 延迟重新启用ABR，让播放器有时间切换
+      setTimeout(() => {
+        if (player && props.adaptiveBitrate) {
+          player.configure({ abr: { enabled: true } })
+        }
+      }, 2000)
+      
+      console.log('已选择低码率轨道:', lowestBitrateTrack.bandwidth, 'bps')
+    }
+  } catch (err) {
+    console.warn('选择低码率轨道失败:', err)
+  }
+}
+
+// 右键菜单相关
+const showContextMenu = (event) => {
+  event.preventDefault()
+  
+  // 更新码率信息
+  updateBitrateInfo()
+  
+  // 计算菜单位置，确保不超出视频容器边界
+  const containerRect = videoContainer.value.getBoundingClientRect()
+  let x = event.clientX - containerRect.left
+  let y = event.clientY - containerRect.top
+  
+  // 限制菜单在容器内
+  const menuWidth = 220
+  const menuHeight = 180
+  
+  if (x + menuWidth > containerRect.width) {
+    x = containerRect.width - menuWidth - 10
+  }
+  if (y + menuHeight > containerRect.height) {
+    y = containerRect.height - menuHeight - 10
+  }
+  
+  contextMenuPosition.value = { x: Math.max(10, x), y: Math.max(10, y) }
+  contextMenuVisible.value = true
+  
+  // 点击其他地方关闭菜单
+  document.addEventListener('click', hideContextMenu)
+  document.addEventListener('contextmenu', hideContextMenu)
+}
+
+const hideContextMenu = () => {
+  contextMenuVisible.value = false
+  document.removeEventListener('click', hideContextMenu)
+  document.removeEventListener('contextmenu', hideContextMenu)
+}
+
 // 视频事件监听
 const setupVideoListeners = () => {
   if (!videoElement.value) return
@@ -530,6 +694,11 @@ const setupVideoListeners = () => {
     currentTime.value = videoElement.value.currentTime
     duration.value = videoElement.value.duration
     playedPercent.value = (currentTime.value / duration.value) * 100 || 0
+    
+    // 定期更新码率信息
+    if (Math.floor(currentTime.value) % 5 === 0) {
+      updateBitrateInfo()
+    }
   })
 
   videoElement.value.addEventListener('progress', () => {
@@ -594,7 +763,11 @@ watch(() => props.src, (newSrc) => {
       // 检查是否是 DASH 视频以加载画质选项
       if (isDashVideo(newSrc)) {
         loadQualities()
+        // 尝试选择最低码率轨道
+        selectLowestBitrateTrack()
       }
+      // 更新码率信息
+      updateBitrateInfo()
     }).catch((err) => {
       console.error('视频加载失败:', err)
       error.value = '视频加载失败'
@@ -620,8 +793,14 @@ onBeforeUnmount(() => {
     clearTimeout(controlsTimeout)
   }
   if (player) {
+    // 移除adaptation事件监听器
+    player.removeEventListener('adaptation', onAdaptation)
     player.destroy()
   }
+  
+  // 清理右键菜单事件监听器
+  document.removeEventListener('click', hideContextMenu)
+  document.removeEventListener('contextmenu', hideContextMenu)
   
   // 清理全屏事件监听器
   if (fullscreenStateHandler) {
@@ -676,28 +855,33 @@ defineExpose({
   background: #000;
 }
 
-/* 始终可见的进度条指示器 */
+/* 始终可见的进度条指示器 - 提高高度以便更容易选择 */
 .persistent-progress {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 4px;  /* 增加默认高度，从3px到4px，确保在Windows PC上更容易看到 */
-  background: rgba(255, 255, 255, 0.25);  /* 增加背景透明度，从0.2到0.25 */
+  height: 8px;  /* 增加默认高度到8px，确保在Windows PC上更容易选择 */
+  background: rgba(255, 255, 255, 0.3);  /* 增加背景透明度 */
   cursor: pointer;
-  z-index: 5;
+  z-index: 15;  /* 提高z-index确保在控制栏上方 */
   transition: height 0.2s ease;
+  /* 增加点击区域 */
+  padding-top: 10px;
+  margin-top: -10px;
+  box-sizing: content-box;
 }
 
 .persistent-progress:hover {
-  height: 6px;  /* hover时增加到6px */
+  height: 12px;  /* hover时增加到12px */
 }
 
 .persistent-progress-bar {
   height: 100%;
   background: var(--primary-color);
-  box-shadow: 0 0 4px rgba(255, 36, 66, 0.8);  /* 增强阴影效果，提高可见性 */
+  box-shadow: 0 0 6px rgba(255, 36, 66, 0.9);  /* 增强阴影效果，提高可见性 */
   transition: width 0.1s linear;
+  border-radius: 0 2px 2px 0;
 }
 
 /* 自定义控制栏 */
@@ -707,7 +891,7 @@ defineExpose({
   left: 0;
   right: 0;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.6) 50%, transparent 100%);
-  padding: 20px 16px 12px;
+  padding: 30px 16px 20px;  /* 增加底部padding，为更高的进度条留出空间 */
   opacity: 0;
   transition: opacity 0.3s ease;
   z-index: 10;
@@ -715,6 +899,80 @@ defineExpose({
 
 .custom-controls.visible {
   opacity: 1;
+}
+
+/* 码率指示器 */
+.bitrate-indicator {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #4ade80;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  font-family: monospace;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: absolute;
+  background: rgba(24, 24, 24, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 12px 0;
+  min-width: 200px;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  animation: fadeInScale 0.15s ease-out;
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.context-menu-header {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.context-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  color: white;
+  font-size: 13px;
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.context-menu-label {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.context-menu-value {
+  color: #4ade80;
+  font-weight: 500;
+  font-family: monospace;
 }
 
 .controls-row {
