@@ -151,14 +151,13 @@ export const videoApi = {
    * @returns {Promise<{success: boolean, data?: Object, message?: string}>}
    */
   async mergeChunks(params) {
-    const { identifier, totalChunks, filename, thumbnail } = params
+    const { identifier, totalChunks, filename } = params
 
     try {
       const response = await request.post('/upload/chunk/merge', {
         identifier,
         totalChunks,
-        filename,
-        thumbnail: thumbnail ? true : false
+        filename
       }, {
         timeout: 300000 // 5分钟超时
       })
@@ -183,11 +182,10 @@ export const videoApi = {
    * @param {Object} options - 选项
    * @param {Function} options.onProgress - 进度回调 (0-100)
    * @param {Function} options.onChunkProgress - 分片进度回调
-   * @param {File} options.thumbnail - 缩略图文件
    * @returns {Promise<{success: boolean, data?: Object, message?: string}>}
    */
   async uploadVideoChunked(file, options = {}) {
-    const { onProgress, onChunkProgress, thumbnail } = options
+    const { onProgress, onChunkProgress } = options
 
     try {
       // 获取服务器分片配置
@@ -257,8 +255,7 @@ export const videoApi = {
       const mergeResult = await this.mergeChunks({
         identifier,
         totalChunks,
-        filename: file.name,
-        thumbnail
+        filename: file.name
       })
 
       if (!mergeResult.success) {

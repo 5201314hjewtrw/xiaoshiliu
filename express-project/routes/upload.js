@@ -396,7 +396,7 @@ router.post('/chunk', authenticateToken, chunkUpload.single('file'), async (req,
 // 合并分片
 router.post('/chunk/merge', authenticateToken, async (req, res) => {
   try {
-    const { identifier, totalChunks, filename, thumbnail } = req.body;
+    const { identifier, totalChunks, filename } = req.body;
     
     if (!identifier || !totalChunks || !filename) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({

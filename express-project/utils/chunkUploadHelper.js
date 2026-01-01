@@ -225,11 +225,8 @@ async function cleanupChunkDir(identifier) {
     const chunkDir = getChunkDir(identifier);
     
     if (fs.existsSync(chunkDir)) {
-      const files = fs.readdirSync(chunkDir);
-      for (const file of files) {
-        fs.unlinkSync(path.join(chunkDir, file));
-      }
-      fs.rmdirSync(chunkDir);
+      // 使用 fs.rmSync 递归删除目录（Node.js 14.14.0+）
+      fs.rmSync(chunkDir, { recursive: true, force: true });
     }
     
     return true;

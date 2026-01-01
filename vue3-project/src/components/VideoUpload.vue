@@ -393,10 +393,25 @@ const startUpload = async () => {
             } else {
               uploadStatus.value = `分片 ${info.current}/${info.total}`
             }
-          },
-          thumbnail: thumbnailToUpload
+          }
         }
       )
+      
+      // 分片上传成功后，单独上传缩略图
+      if (result.success && thumbnailToUpload) {
+        try {
+          uploadStatus.value = '上传封面...'
+          const thumbnailResult = await uploadImage(thumbnailToUpload)
+          if (thumbnailResult.success) {
+            result.data.coverUrl = thumbnailResult.data.url
+            console.log('✅ 缩略图上传成功:', thumbnailResult.data.url)
+          } else {
+            console.warn('⚠️ 缩略图上传失败:', thumbnailResult.message)
+          }
+        } catch (e) {
+          console.warn('⚠️ 缩略图上传异常:', e.message)
+        }
+      }
     } else {
       // 使用普通上传
       result = await videoApi.uploadVideo(
