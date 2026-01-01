@@ -167,7 +167,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onMounted } from 'vue'
 import SvgIcon from '@/components/SvgIcon.vue'
 import CropModal from '@/views/user/components/CropModal.vue'
 import MultiImageUpload from '@/components/MultiImageUpload.vue'
@@ -181,6 +181,7 @@ import ContentEditableInput from '@/components/ContentEditableInput.vue'
 import messageManager from '@/utils/messageManager'
 // 移除uploadApi导入，改用MultiImageUpload组件的uploadAllImages方法
 import { imageUploadApi } from '@/api/index.js'
+import { videoApi } from '@/api/video.js'
 import { useScrollLock } from '@/composables/useScrollLock'
 import { sanitizeContent } from '@/utils/contentSecurity'
 import { generateVideoThumbnail, blobToFile, generateThumbnailFilename } from '@/utils/videoThumbnail'
@@ -243,9 +244,24 @@ const videoFileInputRefs = ref({})
 const videoUploading = ref({})
 const videoErrors = ref({})
 
+// 从服务器获取的视频大小限制配置
+const serverMaxVideoSize = ref(null)
+
 // 提及用户数据（实际使用中应该从 API 获取）
 const mentionUsers = ref([])
 const isSubmitting = ref(false)
+
+// 组件挂载时获取服务器配置
+onMounted(async () => {
+  try {
+    const config = await videoApi.getChunkConfig()
+    if (config.maxFileSize) {
+      serverMaxVideoSize.value = config.maxFileSize
+    }
+  } catch (error) {
+    console.warn('获取服务器视频配置失败，使用默认配置:', error)
+  }
+})
 
 // 计算可见字段
 const visibleFields = computed(() => {
@@ -1104,7 +1120,7 @@ const handleVideoFileSelect = async (event, fieldKey) => {
 
   // 验证文件类型和大小
   const validTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/wmv', 'video/flv']
-  const maxSize = 100 * 1024 * 1024 // 100MB
+  const maxSize = serverMaxVideoSize.value || 100 * 1024 * 1024 // 使用服务器配置或默认100MB
 
   if (!validTypes.includes(file.type)) {
     videoErrors.value[fieldKey] = '请选择有效的视频格式 (MP4, AVI, MOV, WMV, FLV)'
@@ -1113,7 +1129,8 @@ const handleVideoFileSelect = async (event, fieldKey) => {
 
   if (file.size > maxSize) {
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1)
-    videoErrors.value[fieldKey] = `视频大小为 ${fileSizeMB}MB，超过 100MB 限制，请选择更小的视频`
+    const maxSizeMB = Math.round(maxSize / (1024 * 1024))
+    videoErrors.value[fieldKey] = `视频大小为 ${fileSizeMB}MB，超过 ${maxSizeMB}MB 限制，请选择更小的视频`
     return
   }
 

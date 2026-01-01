@@ -410,7 +410,7 @@ const apiGroups = ref([
         method: 'POST',
         path: '/api/upload/video',
         title: '视频上传',
-        description: '上传视频文件，限制100MB，支持mp4、avi、mov格式',
+        description: '上传视频文件，大小限制可通过环境变量VIDEO_MAX_SIZE配置（默认100MB），支持mp4、avi、mov格式',
         auth: true,
         expanded: false,
         params: [

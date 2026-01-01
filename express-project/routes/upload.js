@@ -76,7 +76,7 @@ const videoUpload = multer({
   storage: storage,
   fileFilter: mixedFileFilter, // 使用混合文件过滤器
   limits: {
-    fileSize: 100 * 1024 * 1024 // 100MB 限制
+    fileSize: config.upload.video.maxSizeBytes // 使用配置中的视频大小限制
   }
 });
 
@@ -302,7 +302,7 @@ router.get('/chunk/config', authenticateToken, (req, res) => {
     message: '获取分片配置成功',
     data: {
       chunkSize: config.upload.video.chunk.chunkSize,
-      maxFileSize: 100 * 1024 * 1024 // 100MB
+      maxFileSize: config.upload.video.maxSizeBytes // 使用配置中的视频大小限制
     }
   });
 });

@@ -2054,7 +2054,7 @@ Authorization: Bearer <your_jwt_token>
 - 使用 `multipart/form-data` 格式
 - 文件字段名: `file`
 - 支持格式: mp4, avi, mov, wmv, flv, webm
-- 文件大小限制: 100MB
+- 文件大小限制: 可通过环境变量VIDEO_MAX_SIZE配置（默认100MB）
 
 **响应示例**:
 ```json

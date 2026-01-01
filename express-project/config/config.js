@@ -12,6 +12,38 @@ const mysql = require('mysql2/promise');
 const path = require('path');
 require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
+/**
+ * 将大小字符串转换为字节数
+ * @param {string|number} sizeStr - 大小字符串 (如 "100mb", "50MB") 或数字
+ * @returns {number} 字节数
+ */
+function parseSizeToBytes(sizeStr) {
+  if (typeof sizeStr === 'number') {
+    return sizeStr;
+  }
+  
+  if (typeof sizeStr !== 'string') {
+    return 100 * 1024 * 1024; // 默认 100MB
+  }
+  
+  const units = {
+    b: 1,
+    kb: 1024,
+    mb: 1024 * 1024,
+    gb: 1024 * 1024 * 1024
+  };
+  
+  const match = sizeStr.toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)?$/);
+  if (!match) {
+    return 100 * 1024 * 1024; // 默认 100MB
+  }
+  
+  const value = parseFloat(match[1]);
+  const unit = match[2] || 'b';
+  
+  return Math.floor(value * units[unit]);
+}
+
 const config = {
   // 服务器配置
   server: {
@@ -69,6 +101,7 @@ const config = {
     // 视频上传配置
     video: {
       maxSize: process.env.VIDEO_MAX_SIZE || '100mb',
+      maxSizeBytes: parseSizeToBytes(process.env.VIDEO_MAX_SIZE || '100mb'),
       allowedTypes: ['video/mp4', 'video/avi', 'video/mov', 'video/wmv', 'video/flv', 'video/webm'],
       // 视频上传策略配置（只支持本地和R2，不支持第三方图床）
       strategy: process.env.VIDEO_UPLOAD_STRATEGY || 'local', // 'local' 或 'r2'
