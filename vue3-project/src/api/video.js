@@ -8,6 +8,11 @@ import SparkMD5 from 'spark-md5'
 const DEFAULT_CHUNK_SIZE = 3 * 1024 * 1024
 
 /**
+ * 默认最大文件大小 100MB
+ */
+const DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024
+
+/**
  * 视频上传API
  */
 export const videoApi = {
@@ -21,13 +26,13 @@ export const videoApi = {
       if (response.success) {
         return {
           chunkSize: response.data.chunkSize || DEFAULT_CHUNK_SIZE,
-          maxFileSize: response.data.maxFileSize || 100 * 1024 * 1024
+          maxFileSize: response.data.maxFileSize || DEFAULT_MAX_FILE_SIZE
         }
       }
-      return { chunkSize: DEFAULT_CHUNK_SIZE, maxFileSize: 100 * 1024 * 1024 }
+      return { chunkSize: DEFAULT_CHUNK_SIZE, maxFileSize: DEFAULT_MAX_FILE_SIZE }
     } catch (error) {
       console.warn('获取分片配置失败，使用默认配置:', error)
-      return { chunkSize: DEFAULT_CHUNK_SIZE, maxFileSize: 100 * 1024 * 1024 }
+      return { chunkSize: DEFAULT_CHUNK_SIZE, maxFileSize: DEFAULT_MAX_FILE_SIZE }
     }
   },
 
@@ -338,7 +343,7 @@ export const videoApi = {
    * @returns {Object} 验证结果
    */
   validateVideoFile(file) {
-    const maxSize = apiConfig.upload.video?.maxFileSize || 100 * 1024 * 1024 // 100MB
+    const maxSize = apiConfig.upload.video?.maxFileSize || DEFAULT_MAX_FILE_SIZE
     const allowedTypes = apiConfig.upload.video?.allowedTypes || [
       'video/mp4', 
       'video/avi', 

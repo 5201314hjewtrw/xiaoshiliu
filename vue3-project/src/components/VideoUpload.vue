@@ -47,7 +47,7 @@
         <SvgIcon name="publish" class="upload-icon" />
         <p>添加视频</p>
         <p class="upload-hint">支持 MP4、MOV、AVI 格式</p>
-        <p class="upload-hint">文件大小不超过100MB</p>
+        <p class="upload-hint">文件大小不超过{{ maxSizeMB }}MB</p>
         <p class="drag-hint">或拖拽视频到此处</p>
       </div>
 
@@ -68,7 +68,7 @@
 
     <div class="upload-tips">
       <p>• 支持 MP4、MOV、AVI 格式</p>
-      <p>• 文件大小不超过100MB</p>
+      <p>• 文件大小不超过{{ maxSizeMB }}MB</p>
       <p>• 支持断点续传和分片校验</p>
       <p v-if="videoData && !isUploading">• 点击缩略图可自定义封面</p>
     </div>
@@ -78,7 +78,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import SvgIcon from './SvgIcon.vue'
 import MessageToast from './MessageToast.vue'
 import { videoApi } from '@/api/video.js'
@@ -117,6 +117,30 @@ const error = ref('')
 const showToast = ref(false)
 const toastMessage = ref('')
 const toastType = ref('success')
+// 从服务器获取的配置
+const serverMaxSize = ref(null)
+
+// 计算实际使用的最大文件大小：优先使用服务器配置，如果未获取到则使用prop
+const actualMaxSize = computed(() => {
+  return serverMaxSize.value !== null ? serverMaxSize.value : props.maxSize
+})
+
+// 格式化显示的文件大小（MB）
+const maxSizeMB = computed(() => {
+  return Math.round(actualMaxSize.value / (1024 * 1024))
+})
+
+// 组件挂载时获取服务器配置
+onMounted(async () => {
+  try {
+    const config = await videoApi.getChunkConfig()
+    if (config.maxFileSize) {
+      serverMaxSize.value = config.maxFileSize
+    }
+  } catch (error) {
+    console.warn('Failed to get server video config, using default config:', error)
+  }
+})
 
 // 监听外部值变化
 watch(() => props.modelValue, (newValue) => {
@@ -204,8 +228,8 @@ const validateVideoFile = (file) => {
   }
 
   // 验证文件大小
-  if (file.size > props.maxSize) {
-    return { valid: false, message: `文件大小不能超过${formatFileSize(props.maxSize)}` }
+  if (file.size > actualMaxSize.value) {
+    return { valid: false, message: `文件大小不能超过${formatFileSize(actualMaxSize.value)}` }
   }
 
   return { valid: true }
