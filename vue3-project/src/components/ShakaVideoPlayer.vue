@@ -802,7 +802,12 @@ const selectDefaultBitrateTrack = () => {
       
       // 延迟重新启用ABR，确保默认轨道有足够时间证明其稳定性
       // 如果默认轨道播放流畅且缓冲充足，就不需要频繁切换
+      // 注意：以下是可调整的常量，不同视频长度可能需要不同值：
+      // - 短视频（< 30秒）：沉淀期 5-10秒，缓冲阈值 3-5秒
+      // - 中等视频（30秒 - 5分钟）：沉淀期 10-15秒，缓冲阈值 5-8秒
+      // - 长视频（> 5分钟）：沉淀期 15-20秒，缓冲阈值 8-12秒
       const settlingPeriod = 15000  // 15秒沉淀期，让默认轨道充分缓冲
+      const bufferThreshold = 8      // 8秒缓冲阈值，只有缓冲充足时才启用ABR
       
       // 清除之前的定时器（如果有）
       if (reEnableAbrTimer) {
@@ -825,9 +830,9 @@ const selectDefaultBitrateTrack = () => {
             }
           }
           
-          // 只有当前向缓冲超过8秒时才重新启用ABR
+          // 只有当前向缓冲超过阈值时才重新启用ABR
           // 这表明当前码率下网络状况良好，可以考虑升级
-          if (bufferedAhead > 8) {
+          if (bufferedAhead > bufferThreshold) {
             player.configure({ abr: { enabled: true } })
             console.log(abrMessage)
             console.log(`✅ 缓冲充足 (${bufferedAhead.toFixed(1)}秒)，ABR已重新启用`)
