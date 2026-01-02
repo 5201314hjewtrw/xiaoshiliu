@@ -67,7 +67,7 @@
           </div>
 
           <!-- 画质选择 -->
-          <div v-if="adaptiveBitrate && qualities.length > 1" class="quality-control">
+          <div v-if="qualities.length > 1" class="quality-control">
             <button @click="toggleQualityMenu" class="control-btn quality-btn">
               <span class="quality-text">{{ currentQualityLabel }}</span>
             </button>
@@ -497,8 +497,10 @@ const loadQualities = () => {
   const uniqueHeights = new Set()
   const qualityOptions = []
 
-  // 添加自动选项
-  qualityOptions.push({ id: -1, label: '自动', height: 0 })
+  // 只有在ABR启用时才添加自动选项
+  if (props.adaptiveBitrate) {
+    qualityOptions.push({ id: -1, label: '自动', height: 0 })
+  }
 
   tracks.forEach(track => {
     if (!uniqueHeights.has(track.height)) {
@@ -516,8 +518,10 @@ const loadQualities = () => {
   qualityOptions.sort((a, b) => b.height - a.height)
   qualities.value = qualityOptions
 
-  // 默认选择自动
-  currentQuality.value = -1
+  // ABR启用时默认选择自动，禁用时不设置默认（由selectDefaultBitrateTrack处理）
+  if (props.adaptiveBitrate) {
+    currentQuality.value = -1
+  }
 }
 
 // 播放/暂停切换
@@ -581,16 +585,22 @@ const selectQuality = (quality) => {
   if (!player) return
 
   if (quality.id === -1) {
-    // 自动模式 - 应用最大分辨率限制
-    player.configure({ 
-      abr: { 
-        enabled: true,
-        restrictions: createRestrictions(maxResolutionHeight)
-      } 
-    })
-    console.log('选择画质: 自动模式')
+    // 自动模式 - 只有在ABR启用时才允许
+    if (props.adaptiveBitrate) {
+      player.configure({ 
+        abr: { 
+          enabled: true,
+          restrictions: createRestrictions(maxResolutionHeight)
+        } 
+      })
+      console.log('选择画质: 自动模式')
+    } else {
+      console.warn('ABR已全局禁用，无法选择自动模式')
+      return
+    }
   } else {
     // 手动选择画质 - 不应用分辨率限制，用户可以选择任何分辨率
+    // 无论ABR全局状态如何，手动选择时都禁用ABR
     player.configure({ 
       abr: { 
         enabled: false,
@@ -604,7 +614,7 @@ const selectQuality = (quality) => {
       // 输出选择的分辨率和码率到控制台
       const resolution = `${selectedTrack.width}x${selectedTrack.height}`
       const bitrate = Math.round(selectedTrack.bandwidth / 1000)
-      console.log(`选择画质: ${quality.label} (${resolution}) 码率: ${bitrate}k`)
+      console.log(`手动选择画质: ${quality.label} (${resolution}) 码率: ${bitrate}k`)
     }
   }
 
@@ -880,8 +890,9 @@ const selectDefaultBitrateTrack = () => {
           }
         }, settlingPeriod)
       } else {
-        // ABR已禁用，保持固定分辨率
+        // ABR已禁用，保持固定分辨率，并设置当前画质为该轨道
         console.log(`🔒 ABR保持禁用状态，固定使用 ${defaultTrack.height}p`)
+        currentQuality.value = defaultTrack.id
       }
     }
   } catch (err) {
