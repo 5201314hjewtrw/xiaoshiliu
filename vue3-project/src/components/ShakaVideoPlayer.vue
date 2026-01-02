@@ -280,6 +280,9 @@ const currentQualityLabel = computed(() => {
 // 控制栏自动隐藏定时器
 let controlsTimeout = null
 
+// ABR重新启用定时器
+let reEnableAbrTimer = null
+
 // 全屏状态更新函数引用（用于清理事件监听器）
 let fullscreenStateHandler = null
 let webkitBeginFullscreenHandler = null
@@ -330,8 +333,8 @@ const initPlayer = async () => {
     const rebufferingGoal = parseInt(import.meta.env.VITE_VIDEO_REBUFFERING_GOAL) || 5
     const bufferBehind = parseInt(import.meta.env.VITE_VIDEO_BUFFER_BEHIND) || 16
     const switchInterval = parseInt(import.meta.env.VITE_VIDEO_SWITCH_INTERVAL) || 8
-    // 更高的升级目标：更积极地升级到更高质量
-    const bandwidthUpgradeTarget = parseFloat(import.meta.env.VITE_VIDEO_BANDWIDTH_UPGRADE_TARGET) || 0.75
+    // 更保守的升级目标：避免过早升级导致频繁切换
+    const bandwidthUpgradeTarget = parseFloat(import.meta.env.VITE_VIDEO_BANDWIDTH_UPGRADE_TARGET) || 0.95
     // 更低的降级目标：仅在带宽严重不足时才降级，避免频繁降低质量
     const bandwidthDowngradeTarget = parseFloat(import.meta.env.VITE_VIDEO_BANDWIDTH_DOWNGRADE_TARGET) || 0.35
     const debugConfig = import.meta.env.VITE_VIDEO_DEBUG_CONFIG === 'true'
@@ -797,26 +800,42 @@ const selectDefaultBitrateTrack = () => {
         ? '🎯 ABR已启用: 优先保持720p，仅在严重卡顿时降级'
         : `🎯 ABR已启用: 优先保持${targetHeight}p（原始最高${maxOriginalHeight}p），仅在严重卡顿时降级`
       
-      // 使用一次性事件监听器来在轨道切换完成后重新启用ABR
-      const reEnableAbr = () => {
-        if (player && props.adaptiveBitrate) {
-          player.configure({ abr: { enabled: true } })
-          player.removeEventListener('adaptation', reEnableAbr)
-          console.log(abrMessage)
-        }
+      // 延迟重新启用ABR，确保默认轨道有足够时间证明其稳定性
+      // 如果默认轨道播放流畅且缓冲充足，就不需要频繁切换
+      const settlingPeriod = 15000  // 15秒沉淀期，让默认轨道充分缓冲
+      
+      // 清除之前的定时器（如果有）
+      if (reEnableAbrTimer) {
+        clearTimeout(reEnableAbrTimer)
       }
       
-      // 监听adaptation事件，当轨道切换完成后重新启用ABR
-      player.addEventListener('adaptation', reEnableAbr)
-      
-      // 备用：如果3秒内没有触发adaptation事件，也重新启用ABR
-      setTimeout(() => {
+      reEnableAbrTimer = setTimeout(() => {
         if (player && props.adaptiveBitrate) {
-          player.removeEventListener('adaptation', reEnableAbr)
-          player.configure({ abr: { enabled: true } })
-          console.log(abrMessage)
+          // 检查缓冲状态：只有在缓冲健康时才重新启用ABR
+          const buffered = videoElement.value?.buffered
+          const currentTime = videoElement.value?.currentTime || 0
+          let bufferedAhead = 0
+          
+          if (buffered && buffered.length > 0) {
+            for (let i = 0; i < buffered.length; i++) {
+              if (buffered.start(i) <= currentTime && buffered.end(i) > currentTime) {
+                bufferedAhead = buffered.end(i) - currentTime
+                break
+              }
+            }
+          }
+          
+          // 只有当前向缓冲超过8秒时才重新启用ABR
+          // 这表明当前码率下网络状况良好，可以考虑升级
+          if (bufferedAhead > 8) {
+            player.configure({ abr: { enabled: true } })
+            console.log(abrMessage)
+            console.log(`✅ 缓冲充足 (${bufferedAhead.toFixed(1)}秒)，ABR已重新启用`)
+          } else {
+            console.log(`⏸️ 缓冲不足 (${bufferedAhead.toFixed(1)}秒)，暂不启用ABR以保持稳定`)
+          }
         }
-      }, 3000)
+      }, settlingPeriod)
       
       const resolution = `${defaultTrack.width}x${defaultTrack.height}`
       const bitrate = Math.round(defaultTrack.bandwidth / 1000)
@@ -1025,6 +1044,9 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (controlsTimeout) {
     clearTimeout(controlsTimeout)
+  }
+  if (reEnableAbrTimer) {
+    clearTimeout(reEnableAbrTimer)
   }
   if (player) {
     // 移除adaptation事件监听器
