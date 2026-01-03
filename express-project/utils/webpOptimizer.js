@@ -26,6 +26,11 @@ function resolvePath(inputPath) {
   if (!inputPath) {
     return null;
   }
+
+  // 保持外部URL原样返回，便于加载远程字体/资源
+  if (/^https?:\/\//i.test(inputPath)) {
+    return inputPath;
+  }
   
   // 路径以 / 开头但不是以常见系统目录开头（如 /usr, /var, /etc, /opt, /home）
   // 则视为相对于项目根目录的路径
@@ -253,16 +258,37 @@ class WebPOptimizer {
     // 使用通用的衬线字体作为fallback，这些在大多数系统上都有中文支持
     let fontFamily = '"Noto Sans CJK SC", "Source Han Sans CN", "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Microsoft YaHei", "PingFang SC", "SimHei", "Heiti SC", sans-serif';
     
-    // 如果提供了自定义字体路径，将字体嵌入为base64
+    const fontExtension = fontPath ? path.extname(fontPath.split('?')[0]).toLowerCase() : '';
+    const isExternalFont = fontPath && /^https?:\/\//i.test(fontPath);
+    // 如果提供了自定义字体路径，将字体嵌入为base64，或使用远程字体URL
     // 注意：librsvg对自定义字体的支持有限，可能需要安装系统字体
-    if (fontPath && fs.existsSync(fontPath)) {
+    if (fontPath && isExternalFont) {
+      const ext = fontExtension;
+      let formatHint = 'truetype';
+      if (ext === '.otf') {
+        formatHint = 'opentype';
+      } else if (ext === '.woff') {
+        formatHint = 'woff';
+      } else if (ext === '.woff2') {
+        formatHint = 'woff2';
+      }
+      fontFaceRule = `
+        @font-face {
+          font-family: 'CustomWatermarkFont';
+          src: url('${fontPath}') format('${formatHint}');
+          font-weight: normal;
+          font-style: normal;
+        }`;
+      fontFamily = '"CustomWatermarkFont", "Noto Sans CJK SC", "Source Han Sans CN", "WenQuanYi Zen Hei", "SimHei", sans-serif';
+      console.log(`WebP Optimizer: 使用远程字体 - ${fontPath}`);
+    } else if (fontPath && fs.existsSync(fontPath)) {
       try {
         // 读取字体文件并转换为base64
         const fontData = fs.readFileSync(fontPath);
         const fontBase64 = fontData.toString('base64');
         
         // 根据字体文件扩展名确定MIME类型和格式
-        const ext = path.extname(fontPath).toLowerCase();
+        const ext = fontExtension;
         let mimeType = 'font/ttf';
         let formatHint = 'truetype';
         if (ext === '.otf') {
@@ -623,7 +649,7 @@ class WebPOptimizer {
     // 如果未指定（undefined），则使用后端配置的默认值
     // 如果指定了 false，则不添加水印
     // 如果指定了 true，则添加水印（前提是后端已启用）
-    const userWantsWatermark = context.applyWatermark !== false; // 默认为 true
+    const userWantsWatermark = context.applyWatermark === true; // 默认为不添加，需显式开启
     const shouldApplyWatermark = userWantsWatermark && (this.options.enableWatermark || this.options.enableUsernameWatermark);
     const shouldResize = this.options.maxWidth || this.options.maxHeight;
     

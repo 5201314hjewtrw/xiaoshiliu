@@ -87,10 +87,10 @@ router.post('/single', authenticateToken, upload.single('file'), async (req, res
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '没有上传文件' });
     }
 
-    // 解析用户是否希望添加水印（默认为 true，即添加水印）
-    // 用户可通过请求参数 watermark=false 来禁用水印
+    // 解析用户是否希望添加水印（默认不添加，需显式传递 true）
+    // 用户可通过请求参数 watermark=true 来启用水印
     const watermarkParam = req.body.watermark;
-    const applyWatermark = watermarkParam !== 'false' && watermarkParam !== false;
+    const applyWatermark = watermarkParam === 'true' || watermarkParam === true || watermarkParam === 1 || watermarkParam === '1';
     console.log(`水印参数解析 - 原始值: ${watermarkParam}, 类型: ${typeof watermarkParam}, 结果: ${applyWatermark}`);
     
     // 解析用户自定义的水印透明度（可选，10-100）
@@ -154,9 +154,9 @@ router.post('/multiple', authenticateToken, upload.array('files', 9), async (req
       });
     }
 
-    // 解析用户是否希望添加水印（默认为 true，即添加水印）
+    // 解析用户是否希望添加水印（默认不添加，需显式传递 true）
     const watermarkParamMultiple = req.body.watermark;
-    const applyWatermark = watermarkParamMultiple !== 'false' && watermarkParamMultiple !== false;
+    const applyWatermark = watermarkParamMultiple === 'true' || watermarkParamMultiple === true || watermarkParamMultiple === 1 || watermarkParamMultiple === '1';
     console.log(`[多图上传] 水印参数解析 - 原始值: ${watermarkParamMultiple}, 类型: ${typeof watermarkParamMultiple}, 结果: ${applyWatermark}`);
     
     // 解析用户自定义的水印透明度（可选，10-100）
@@ -270,8 +270,8 @@ router.post('/video', authenticateToken, videoUpload.fields([
 
     let coverUrl = null;
 
-    // 解析用户是否希望添加水印（默认为 true，即添加水印）
-    const applyWatermark = req.body.watermark !== 'false' && req.body.watermark !== false;
+    // 解析用户是否希望添加水印（默认不添加，需显式传递 true）
+    const applyWatermark = req.body.watermark === 'true' || req.body.watermark === true || req.body.watermark === 1 || req.body.watermark === '1';
 
     // 准备用户上下文（用于缩略图水印）
     // 格式: nickname @xise_id 或 nickname @user_id
