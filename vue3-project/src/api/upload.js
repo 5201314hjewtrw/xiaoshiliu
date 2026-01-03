@@ -1,49 +1,3 @@
-// 压缩图片函数
-const compressImage = (file, maxSizeMB = 0.8, quality = 0.4) => {
-  return new Promise((resolve) => {
-    // 对于800KB以下的文件不进行压缩
-    if (file.size <= maxSizeMB * 1024 * 1024) {
-      resolve(file)
-      return
-    }
-
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
-    const img = new Image()
-
-    img.onload = () => {
-      // 超过800KB的图片使用强力压缩
-      const compressQuality = 0.4
-      const maxDimension = 1200
-
-      // 计算新的尺寸
-      let { width, height } = img
-      if (width > maxDimension || height > maxDimension) {
-        const ratio = Math.min(maxDimension / width, maxDimension / height)
-        width = Math.floor(width * ratio)
-        height = Math.floor(height * ratio)
-      }
-
-      canvas.width = width
-      canvas.height = height
-
-      // 绘制并压缩
-      ctx.drawImage(img, 0, 0, width, height)
-      canvas.toBlob((blob) => {
-        const compressedFile = new File([blob], file.name, {
-          type: file.type,
-          lastModified: Date.now()
-        })
-
-        resolve(compressedFile)
-      }, file.type, compressQuality)
-    }
-
-    img.onerror = () => resolve(file) // 加载失败，返回原文件
-    img.src = URL.createObjectURL(file)
-  })
-}
-
 // 默认分片大小 3MB（与视频分片一致）
 const DEFAULT_CHUNK_SIZE = 3 * 1024 * 1024
 
@@ -269,18 +223,17 @@ export async function uploadImage(file, options = {}) {
     if (file instanceof File && !file.type.startsWith('image/')) throw new Error('请选择图片文件')
     if (file.size > DEFAULT_IMAGE_MAX_SIZE) throw new Error('图片大小不能超过100MB')
 
-    // 压缩图片
-    const compressedFile = await compressImage(file)
-    
-    // 如果压缩后的文件仍然超过3MB，使用分片上传
-    if (compressedFile.size > DEFAULT_CHUNK_THRESHOLD) {
-      console.log(`📤 图片大小 ${formatFileSize(compressedFile.size)} 超过 3MB，使用分片上传`)
-      return await uploadImageChunked(compressedFile, options)
+    // 不进行前端压缩，直接上传原文件，由后端进行压缩和WebP转换处理
+    // 注意：上传大文件会增加网络传输时间，但后端会进行优化处理
+    // 如果文件超过3MB，使用分片上传以提高大文件上传的可靠性
+    if (file.size > DEFAULT_CHUNK_THRESHOLD) {
+      console.log(`📤 图片大小 ${formatFileSize(file.size)} 超过 3MB，使用分片上传`)
+      return await uploadImageChunked(file, options)
     }
 
     const formData = new FormData()
-    const filename = options.filename || (compressedFile instanceof File ? compressedFile.name : 'image.png')
-    formData.append('file', compressedFile, filename)
+    const filename = options.filename || (file instanceof File ? file.name : 'image.png')
+    formData.append('file', file, filename)
     
     // 添加水印选项（仅当显式开启时才应用）
     const applyWatermark = options.watermark === true
