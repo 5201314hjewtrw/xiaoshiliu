@@ -728,7 +728,7 @@ class WebPOptimizer {
    * 应用用户名水印
    * @param {sharp.Sharp} image - Sharp图片对象
    * @param {Object} metadata - 图片元数据
-   * @param {Object} context - 上下文（包含用户信息）
+   * @param {Object} context - 上下文（包含用户信息和自定义选项）
    * @returns {Promise<sharp.Sharp>}
    */
   async applyUsernameWatermark(image, metadata, context = {}) {
@@ -742,29 +742,53 @@ class WebPOptimizer {
       return image;
     }
     
-    const fontSize = this.options.usernameWatermarkFontSize;
-    const opacity = this.options.usernameWatermarkOpacity;
-    const color = this.options.usernameWatermarkColor;
+    // 前端自定义选项优先，否则使用后端配置
+    const fontSize = context.usernameFontSize || this.options.usernameWatermarkFontSize;
+    const opacity = context.usernameOpacity || this.options.usernameWatermarkOpacity;
+    const color = context.usernameColor || this.options.usernameWatermarkColor;
     const fontPath = this.options.usernameWatermarkFontPath;
     
-    console.log(`WebP Optimizer: 应用用户名水印 - 内容: "${text}", 字体大小: ${fontSize}, 透明度: ${opacity}%, 位置: ${this.options.usernameWatermarkPosition}`);
+    // 位置：优先使用前端提供的精确坐标，否则使用配置的位置模式
+    let position;
+    let positionSource = '后端默认';
     
-    try {
-      // 尝试使用sharp的text方法（适用于sharp 0.32.0+）
-      const hexColor = color.replace('#', '');
-      const r = parseInt(hexColor.substring(0, 2), 16);
-      const g = parseInt(hexColor.substring(2, 4), 16);
-      const b = parseInt(hexColor.substring(4, 6), 16);
-      
-      // 计算水印尺寸（估算）
+    if (context.usernamePositionX !== undefined && context.usernamePositionY !== undefined) {
+      // 前端提供了精确坐标
+      position = {
+        x: context.usernamePositionX,
+        y: context.usernamePositionY
+      };
+      positionSource = '前端自定义 (精确坐标)';
+    } else if (context.usernamePosition) {
+      // 前端提供了九宫格位置
       const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
       const otherChars = text.length - chineseChars;
       const charWidth = fontSize * CHAR_WIDTH_RATIO;
       const watermarkWidth = Math.ceil(chineseChars * fontSize + otherChars * charWidth) + 20;
       const watermarkHeight = fontSize + 10;
       
-      // 计算位置
-      const position = this.getWatermarkPosition(
+      position = this.getWatermarkPosition(
+        context.usernamePosition,
+        metadata.width,
+        metadata.height,
+        watermarkWidth,
+        watermarkHeight,
+        {
+          positionMode: 'grid',
+          preciseX: 20,
+          preciseY: 20
+        }
+      );
+      positionSource = '前端自定义 (九宫格)';
+    } else {
+      // 使用后端配置的位置
+      const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+      const otherChars = text.length - chineseChars;
+      const charWidth = fontSize * CHAR_WIDTH_RATIO;
+      const watermarkWidth = Math.ceil(chineseChars * fontSize + otherChars * charWidth) + 20;
+      const watermarkHeight = fontSize + 10;
+      
+      position = this.getWatermarkPosition(
         this.options.usernameWatermarkPosition,
         metadata.width,
         metadata.height,
@@ -776,6 +800,16 @@ class WebPOptimizer {
           preciseY: this.options.usernameWatermarkPreciseY
         }
       );
+    }
+    
+    console.log(`WebP Optimizer: 应用用户名水印 - 内容: "${text}", 字体大小: ${fontSize}${context.usernameFontSize ? ' (前端)' : ' (后端)'}, 透明度: ${opacity}%${context.usernameOpacity ? ' (前端)' : ' (后端)'}, 位置: ${positionSource}`);
+    
+    try {
+      // 尝试使用sharp的text方法（适用于sharp 0.32.0+）
+      const hexColor = color.replace('#', '');
+      const r = parseInt(hexColor.substring(0, 2), 16);
+      const g = parseInt(hexColor.substring(2, 4), 16);
+      const b = parseInt(hexColor.substring(4, 6), 16);
       
       // 先创建文字图层
       const textBuffer = await sharp({
@@ -835,27 +869,6 @@ class WebPOptimizer {
       
       // 回退到SVG方法
       const svgBuffer = this.createTextWatermarkSvg(text, fontSize, color, opacity, fontPath);
-      
-      // 获取SVG尺寸估算
-      const chineseChars = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-      const otherChars = text.length - chineseChars;
-      const charWidth = fontSize * CHAR_WIDTH_RATIO;
-      const watermarkWidth = Math.ceil(chineseChars * fontSize + otherChars * charWidth) + 20;
-      const watermarkHeight = fontSize + 10;
-      
-      // 计算位置
-      const position = this.getWatermarkPosition(
-        this.options.usernameWatermarkPosition,
-        metadata.width,
-        metadata.height,
-        watermarkWidth,
-        watermarkHeight,
-        {
-          positionMode: this.options.usernameWatermarkPositionMode,
-          preciseX: this.options.usernameWatermarkPreciseX,
-          preciseY: this.options.usernameWatermarkPreciseY
-        }
-      );
       
       // 应用水印
       return image.composite([{
