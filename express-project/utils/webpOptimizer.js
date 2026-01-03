@@ -239,7 +239,6 @@ class WebPOptimizer {
    * @param {number} opacity - 透明度 (0-100)
    * @param {string|null} fontPath - 自定义字体路径
    * @returns {Promise<Buffer>} PNG缓冲区
-   * @note This method is async to support future async operations, but current implementation is synchronous
    */
   async createTextWatermarkCanvas(text, fontSize, color, opacity, fontPath = null) {
     // 将hex颜色转换为rgba
@@ -254,7 +253,7 @@ class WebPOptimizer {
     if (fontPath && fs.existsSync(fontPath)) {
       try {
         // 使用字体路径的hash作为唯一标识，避免重复注册
-        const fontHash = require('crypto').createHash('md5').update(fontPath).digest('hex').substring(0, 8);
+        const fontHash = crypto.createHash('md5').update(fontPath).digest('hex').substring(0, 8);
         const fontName = `CustomWatermarkFont_${fontHash}`;
         
         // 检查字体是否已注册
