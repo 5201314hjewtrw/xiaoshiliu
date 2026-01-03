@@ -9,6 +9,7 @@
 const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
 const config = require('../config/config');
 
 // 常量定义
@@ -258,11 +259,40 @@ class WebPOptimizer {
     // 使用通用的衬线字体作为fallback，这些在大多数系统上都有中文支持
     let fontFamily = '"Noto Sans CJK SC", "Source Han Sans CN", "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Microsoft YaHei", "PingFang SC", "SimHei", "Heiti SC", sans-serif';
     
-    const fontExtension = fontPath ? path.extname(fontPath.split('?')[0]).toLowerCase() : '';
-    const isExternalFont = fontPath && /^https?:\/\//i.test(fontPath);
+    const rawFontPath = fontPath ? String(fontPath) : '';
+    const getFontExtension = (input) => path.extname(input.split('?')[0]).toLowerCase();
+    const fontExtension = rawFontPath ? getFontExtension(rawFontPath) : '';
+    let safeExternalFontUrl = null;
+    if (rawFontPath && /^https?:\/\//i.test(rawFontPath)) {
+      try {
+        const parsedUrl = new URL(rawFontPath);
+        const allowedProtocols = ['http:', 'https:'];
+        if (allowedProtocols.includes(parsedUrl.protocol)) {
+          const hostname = parsedUrl.hostname;
+          const ipVersion = net.isIP(hostname);
+          let isPrivateIp = false;
+          if (ipVersion === 4) {
+            isPrivateIp = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.|169\.254\.)/.test(hostname);
+          } else if (ipVersion === 6) {
+            const normalizedHost = hostname.toLowerCase();
+            isPrivateIp = normalizedHost === '::1' || normalizedHost.startsWith('fc00:') || normalizedHost.startsWith('fd00:') || normalizedHost.startsWith('fe80:');
+          }
+          if (hostname === 'localhost' || isPrivateIp) {
+            console.warn(`WebP Optimizer: 外部字体URL指向内网或本地地址，已忽略 - ${hostname}`);
+          } else {
+            safeExternalFontUrl = parsedUrl.toString();
+          }
+        } else {
+          console.warn(`WebP Optimizer: 外部字体协议不被允许 - ${parsedUrl.protocol}`);
+        }
+      } catch (err) {
+        console.warn(`WebP Optimizer: 外部字体URL无效 - ${err.message}`);
+      }
+    }
+    const isExternalFont = !!safeExternalFontUrl;
     // 如果提供了自定义字体路径，将字体嵌入为base64，或使用远程字体URL
     // 注意：librsvg对自定义字体的支持有限，可能需要安装系统字体
-    if (fontPath && isExternalFont) {
+    if (isExternalFont && safeExternalFontUrl) {
       const ext = fontExtension;
       let formatHint = 'truetype';
       if (ext === '.otf') {
@@ -272,15 +302,17 @@ class WebPOptimizer {
       } else if (ext === '.woff2') {
         formatHint = 'woff2';
       }
+      const encodedUrl = encodeURI(safeExternalFontUrl);
+      const cssSafeUrl = encodedUrl.replace(/([\\'"(){}@\s;])/g, '\\$1');
       fontFaceRule = `
         @font-face {
           font-family: 'CustomWatermarkFont';
-          src: url('${fontPath}') format('${formatHint}');
+          src: url('${cssSafeUrl}') format('${formatHint}');
           font-weight: normal;
           font-style: normal;
         }`;
       fontFamily = '"CustomWatermarkFont", "Noto Sans CJK SC", "Source Han Sans CN", "WenQuanYi Zen Hei", "SimHei", sans-serif';
-      console.log(`WebP Optimizer: 使用远程字体 - ${fontPath}`);
+      console.log(`WebP Optimizer: 使用远程字体 - ${safeExternalFontUrl}`);
     } else if (fontPath && fs.existsSync(fontPath)) {
       try {
         // 读取字体文件并转换为base64
