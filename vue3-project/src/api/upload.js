@@ -44,14 +44,239 @@ const compressImage = (file, maxSizeMB = 0.8, quality = 0.4) => {
   })
 }
 
+// 默认分片大小 3MB（与视频分片一致）
+const DEFAULT_CHUNK_SIZE = 3 * 1024 * 1024
+
+// 默认图片最大大小 100MB
+const DEFAULT_IMAGE_MAX_SIZE = 100 * 1024 * 1024
+
+// 超过此大小的图片使用分片上传（默认3MB）
+const DEFAULT_CHUNK_THRESHOLD = 3 * 1024 * 1024
+
+// 导入SparkMD5（用于计算文件MD5）
+import SparkMD5 from 'spark-md5'
+
+/**
+ * 计算文件MD5（用于生成唯一标识符）
+ * @param {File} file - 文件
+ * @returns {Promise<string>} MD5值
+ */
+async function calculateFileMD5(file) {
+  return new Promise((resolve, reject) => {
+    const spark = new SparkMD5.ArrayBuffer()
+    const reader = new FileReader()
+    const chunkSize = 2 * 1024 * 1024 // 2MB chunks for MD5 calculation
+    let currentChunk = 0
+    const chunks = Math.ceil(file.size / chunkSize)
+
+    reader.onload = (e) => {
+      spark.append(e.target.result)
+      currentChunk++
+
+      if (currentChunk < chunks) {
+        loadNext()
+      } else {
+        resolve(spark.end())
+      }
+    }
+
+    reader.onerror = () => {
+      reject(new Error('文件读取失败'))
+    }
+
+    function loadNext() {
+      const start = currentChunk * chunkSize
+      const end = Math.min(start + chunkSize, file.size)
+      reader.readAsArrayBuffer(file.slice(start, end))
+    }
+
+    loadNext()
+  })
+}
+
+/**
+ * 计算分片MD5
+ * @param {Blob} chunk - 分片数据
+ * @returns {Promise<string>} MD5值
+ */
+async function calculateChunkMD5(chunk) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const spark = new SparkMD5.ArrayBuffer()
+      spark.append(e.target.result)
+      resolve(spark.end())
+    }
+    reader.onerror = () => reject(new Error('分片读取失败'))
+    reader.readAsArrayBuffer(chunk)
+  })
+}
+
+/**
+ * 获取当前用户会话ID用于防止分片冲突
+ * 使用随机生成的会话ID而不是token哈希，避免敏感信息泄露
+ * @returns {string} 会话ID
+ */
+function getSessionId() {
+  const SESSION_KEY = 'upload_session_id'
+  let sessionId = sessionStorage.getItem(SESSION_KEY)
+  
+  if (!sessionId) {
+    // 生成随机的会话ID
+    const randomPart = Math.random().toString(36).substring(2, 10)
+    const timePart = Date.now().toString(36)
+    sessionId = `${randomPart}${timePart}`
+    sessionStorage.setItem(SESSION_KEY, sessionId)
+  }
+  
+  return sessionId
+}
+
+/**
+ * 使用分片方式上传图片
+ * @param {File} file - 图片文件
+ * @param {Object} options - 选项
+ * @returns {Promise<{success: boolean, data?: Object, message?: string}>}
+ */
+async function uploadImageChunked(file, options = {}) {
+  const { watermark, watermarkOpacity, onProgress } = options
+  const chunkSize = DEFAULT_CHUNK_SIZE
+  
+  try {
+    // 计算文件唯一标识符（包含用户ID防止冲突）
+    console.log('📊 计算图片文件MD5...')
+    const fileMD5 = await calculateFileMD5(file)
+    const sessionId = getSessionId()
+    const identifier = `img_${sessionId}_${fileMD5}_${file.size}`
+    console.log(`📝 图片文件标识符: ${identifier}`)
+    
+    // 计算分片数量
+    const totalChunks = Math.ceil(file.size / chunkSize)
+    console.log(`📦 图片大小: ${formatFileSize(file.size)}, 分片数: ${totalChunks}`)
+    
+    const token = localStorage.getItem('token') || localStorage.getItem('admin_token')
+    if (!token) {
+      throw new Error('未登录，请先登录')
+    }
+    
+    let uploadedChunks = 0
+    
+    // 逐个上传分片
+    for (let i = 1; i <= totalChunks; i++) {
+      const start = (i - 1) * chunkSize
+      const end = Math.min(start + chunkSize, file.size)
+      const chunk = file.slice(start, end)
+      
+      // 计算分片MD5用于验证
+      const chunkMD5 = await calculateChunkMD5(chunk)
+      
+      // 检查分片是否已存在（断点续传）
+      const verifyResponse = await fetch(`/api/upload/chunk/verify?identifier=${encodeURIComponent(identifier)}&chunkNumber=${i}&md5=${chunkMD5}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (verifyResponse.ok) {
+        const verifyResult = await verifyResponse.json()
+        if (verifyResult.data?.exists && verifyResult.data?.valid) {
+          console.log(`⏭️ 图片分片 ${i}/${totalChunks} 已存在，跳过`)
+          uploadedChunks++
+          const progress = Math.round((uploadedChunks / totalChunks) * 100)
+          onProgress?.(progress)
+          continue
+        }
+      }
+      
+      // 上传分片
+      console.log(`📤 上传图片分片 ${i}/${totalChunks}...`)
+      const formData = new FormData()
+      formData.append('file', chunk, `chunk_${i}`)
+      formData.append('identifier', identifier)
+      formData.append('chunkNumber', i.toString())
+      formData.append('totalChunks', totalChunks.toString())
+      formData.append('filename', file.name)
+      
+      const uploadResponse = await fetch('/api/upload/chunk', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (!uploadResponse.ok) {
+        throw new Error(`分片 ${i} 上传失败: HTTP ${uploadResponse.status}`)
+      }
+      
+      const uploadResult = await uploadResponse.json()
+      if (uploadResult.code !== 200) {
+        throw new Error(`分片 ${i} 上传失败: ${uploadResult.message}`)
+      }
+      
+      uploadedChunks++
+      const progress = Math.round((uploadedChunks / totalChunks) * 100)
+      onProgress?.(progress)
+      console.log(`✅ 图片分片 ${i}/${totalChunks} 上传成功`)
+    }
+    
+    // 合并分片
+    console.log('🔄 开始合并图片分片...')
+    const mergeResponse = await fetch('/api/upload/chunk/merge/image', {
+      method: 'POST',
+      body: JSON.stringify({
+        identifier,
+        totalChunks,
+        filename: file.name,
+        watermark: watermark === true,
+        watermarkOpacity
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    
+    if (!mergeResponse.ok) {
+      throw new Error(`图片合并失败: HTTP ${mergeResponse.status}`)
+    }
+    
+    const mergeResult = await mergeResponse.json()
+    if (mergeResult.code !== 200) {
+      throw new Error(mergeResult.message || '图片合并失败')
+    }
+    
+    console.log('✅ 图片分片上传完成:', mergeResult.data)
+    return {
+      success: true,
+      data: { url: mergeResult.data.url, originalName: file.name, size: file.size },
+      message: '上传成功'
+    }
+  } catch (error) {
+    console.error('❌ 图片分片上传失败:', error)
+    return {
+      success: false,
+      data: null,
+      message: error.message || '图片上传失败'
+    }
+  }
+}
+
 export async function uploadImage(file, options = {}) {
   try {
     if (!file) throw new Error('请选择要上传的文件')
     if (file instanceof File && !file.type.startsWith('image/')) throw new Error('请选择图片文件')
-    if (file.size > 5 * 1024 * 1024) throw new Error('图片大小不能超过5MB')
+    if (file.size > DEFAULT_IMAGE_MAX_SIZE) throw new Error('图片大小不能超过100MB')
 
     // 压缩图片
     const compressedFile = await compressImage(file)
+    
+    // 如果压缩后的文件仍然超过3MB，使用分片上传
+    if (compressedFile.size > DEFAULT_CHUNK_THRESHOLD) {
+      console.log(`📤 图片大小 ${formatFileSize(compressedFile.size)} 超过 3MB，使用分片上传`)
+      return await uploadImageChunked(compressedFile, options)
+    }
 
     const formData = new FormData()
     const filename = options.filename || (compressedFile instanceof File ? compressedFile.name : 'image.png')
@@ -172,6 +397,9 @@ export async function uploadCroppedImage(blob, options = {}) {
     const formData = new FormData()
     const filename = options.filename || 'avatar.png'
     formData.append('file', blob, filename)
+    
+    // 标记为头像上传，后端将强制转换为WebP，质量75%
+    formData.append('isAvatar', 'true')
 
     // 自动检测token类型（管理员或普通用户）
     const adminToken = localStorage.getItem('admin_token')
@@ -218,7 +446,7 @@ export async function uploadCroppedImage(blob, options = {}) {
 
 export function validateImageFile(file, options = {}) {
   const {
-    maxSize = 5 * 1024 * 1024,
+    maxSize = DEFAULT_IMAGE_MAX_SIZE,
     allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
   } = options
 
