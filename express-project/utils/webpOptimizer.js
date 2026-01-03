@@ -640,7 +640,7 @@ class WebPOptimizer {
       // 加载水印图片
       let watermark = sharp(watermarkPath);
       const watermarkMeta = await watermark.metadata();
-      console.log(`WebP Optimizer: 水印图片尺寸: ${watermarkMeta.width}x${watermarkMeta.height}, 格式: ${watermarkMeta.format}`);
+      console.log(`WebP Optimizer: 水印图片尺寸: ${watermarkMeta.width}x${watermarkMeta.height}, 格式: ${watermarkMeta.format}, 通道数: ${watermarkMeta.channels}`);
       
       // 计算水印尺寸（基于比例）
       const ratio = this.options.watermarkImageRatio / 10;
@@ -660,35 +660,39 @@ class WebPOptimizer {
       console.log(`WebP Optimizer: 水印缩放 - 目标尺寸: ${newWidth}x${newHeight}, 透明度: ${opacity * 100}%, 平铺模式: ${this.options.watermarkTileMode ? '是' : '否'}`);
       
       // 获取水印Buffer - 先调整大小并确保有alpha通道
-      const resizedWatermark = watermark.resize(newWidth, newHeight).ensureAlpha();
-      
       let watermarkBuffer;
-      if (opacity < 1) {
-        // 需要调整透明度时，提取并修改alpha通道
-        const { data, info } = await resizedWatermark
-          .raw()
-          .toBuffer({ resolveWithObject: true });
-        
-        // 修改每个像素的alpha通道
-        for (let i = 3; i < data.length; i += 4) {
-          data[i] = Math.round(data[i] * opacity);
-        }
-        
-        // 重新创建图片，使用PNG格式以保留透明度
-        watermarkBuffer = await sharp(data, {
-          raw: {
-            width: info.width,
-            height: info.height,
-            channels: info.channels
-          }
-        }).png().toBuffer();
-        
-        console.log(`WebP Optimizer: 已应用水印透明度调整 (${Math.round(opacity * 100)}%)`);
-      } else {
-        // 不需要调整透明度时，转换为PNG以保留原有透明度
-        watermarkBuffer = await resizedWatermark.png().toBuffer();
-        console.log(`WebP Optimizer: 使用原始透明度 (100%)`);
+      
+      // 始终处理透明度，即使是100%也要确保有alpha通道
+      // 调整大小并确保有alpha通道
+      const resizedWatermark = await watermark
+        .resize(newWidth, newHeight)
+        .ensureAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      
+      const { data, info } = resizedWatermark;
+      
+      // 如果没有4个通道（RGBA），说明ensureAlpha没有正常工作
+      if (info.channels !== 4) {
+        console.warn(`WebP Optimizer: 水印图片通道数不正确: ${info.channels}，预期4通道(RGBA)`);
       }
+      
+      // 修改每个像素的alpha通道
+      for (let i = 3; i < data.length; i += 4) {
+        // 将现有的alpha值乘以配置的透明度
+        data[i] = Math.round(data[i] * opacity);
+      }
+      
+      // 重新创建图片，使用PNG格式以保留透明度
+      watermarkBuffer = await sharp(data, {
+        raw: {
+          width: info.width,
+          height: info.height,
+          channels: 4 // 明确指定4通道
+        }
+      }).png().toBuffer();
+      
+      console.log(`WebP Optimizer: 已应用水印透明度调整 (${Math.round(opacity * 100)}%)`);
       
       // 检查是否使用平铺模式
       if (this.options.watermarkTileMode) {
@@ -748,6 +752,7 @@ class WebPOptimizer {
       }
     } catch (error) {
       console.error('WebP Optimizer: 应用图片水印失败:', error.message);
+      console.error(error.stack);
       return image;
     }
   }
