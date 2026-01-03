@@ -1,8 +1,10 @@
 # 使用官方Node.js运行时作为基础镜像
 FROM node:18-alpine
 
-# 安装 FFmpeg 和 FFprobe
-RUN apk add --no-cache ffmpeg
+# 安装 FFmpeg、FFprobe 和中文字体
+# fonts-noto-cjk-extra 包含 Noto Sans CJK 字体，支持中日韩文字
+RUN apk add --no-cache ffmpeg fontconfig font-noto-cjk && \
+    fc-cache -fv
 
 # 设置工作目录
 WORKDIR /app

@@ -250,50 +250,62 @@ class WebPOptimizer {
     
     // 构建字体相关的CSS
     let fontFaceRule = '';
-    let fontFamily = '"Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif';
+    // 使用通用的衬线字体作为fallback，这些在大多数系统上都有中文支持
+    let fontFamily = '"Noto Sans CJK SC", "Source Han Sans CN", "WenQuanYi Zen Hei", "WenQuanYi Micro Hei", "Droid Sans Fallback", "Microsoft YaHei", "PingFang SC", "SimHei", "Heiti SC", sans-serif';
     
     // 如果提供了自定义字体路径，将字体嵌入为base64
-    // 这是唯一可靠的方法让librsvg（Sharp的SVG渲染器）正确加载自定义字体
+    // 注意：librsvg对自定义字体的支持有限，可能需要安装系统字体
     if (fontPath && fs.existsSync(fontPath)) {
       try {
         // 读取字体文件并转换为base64
         const fontData = fs.readFileSync(fontPath);
         const fontBase64 = fontData.toString('base64');
         
-        // 根据字体文件扩展名确定MIME类型
+        // 根据字体文件扩展名确定MIME类型和格式
         const ext = path.extname(fontPath).toLowerCase();
         let mimeType = 'font/ttf';
+        let formatHint = 'truetype';
         if (ext === '.otf') {
           mimeType = 'font/otf';
+          formatHint = 'opentype';
         } else if (ext === '.woff') {
           mimeType = 'font/woff';
+          formatHint = 'woff';
         } else if (ext === '.woff2') {
           mimeType = 'font/woff2';
+          formatHint = 'woff2';
         }
         
+        // 使用多种方式声明字体，增加兼容性
         fontFaceRule = `
           @font-face {
             font-family: 'CustomWatermarkFont';
-            src: url('data:${mimeType};base64,${fontBase64}') format('${ext === '.otf' ? 'opentype' : 'truetype'}');
+            src: url('data:${mimeType};base64,${fontBase64}') format('${formatHint}');
+            font-weight: normal;
+            font-style: normal;
           }`;
-        fontFamily = '"CustomWatermarkFont", "Noto Sans CJK SC", "Source Han Sans SC", Arial, sans-serif';
+        fontFamily = '"CustomWatermarkFont", "Noto Sans CJK SC", "Source Han Sans CN", "WenQuanYi Zen Hei", "SimHei", sans-serif';
         console.log(`WebP Optimizer: 使用自定义字体(base64嵌入) - ${fontPath}, 大小: ${Math.round(fontData.length/1024)}KB`);
       } catch (fontError) {
         console.error(`WebP Optimizer: 读取字体文件失败: ${fontError.message}`);
       }
+    } else {
+      console.log(`WebP Optimizer: 使用系统默认中文字体`);
     }
     
-    // 创建SVG
+    // 创建SVG - 使用dominant-baseline和text-anchor来更好地定位文字
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-      <style>
-        ${fontFaceRule}
-        .watermark-text {
-          font-family: ${fontFamily};
-          font-size: ${fontSize}px;
-          fill: rgba(${r}, ${g}, ${b}, ${a});
-          text-shadow: 1px 1px 2px rgba(0, 0, 0, ${a * 0.8});
-        }
-      </style>
+      <defs>
+        <style type="text/css">
+          ${fontFaceRule}
+          .watermark-text {
+            font-family: ${fontFamily};
+            font-size: ${fontSize}px;
+            fill: rgba(${r}, ${g}, ${b}, ${a});
+            font-weight: normal;
+          }
+        </style>
+      </defs>
       <text x="10" y="${fontSize}" class="watermark-text">${this.escapeXml(text)}</text>
     </svg>`;
     
