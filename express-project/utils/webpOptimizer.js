@@ -11,6 +11,7 @@ const { createCanvas, loadImage, GlobalFonts } = require('@napi-rs/canvas');
 const path = require('path');
 const fs = require('fs');
 const net = require('net');
+const crypto = require('crypto');
 const config = require('../config/config');
 
 // 常量定义
@@ -238,6 +239,7 @@ class WebPOptimizer {
    * @param {number} opacity - 透明度 (0-100)
    * @param {string|null} fontPath - 自定义字体路径
    * @returns {Promise<Buffer>} PNG缓冲区
+   * @note This method is async to support future async operations, but current implementation is synchronous
    */
   async createTextWatermarkCanvas(text, fontSize, color, opacity, fontPath = null) {
     // 将hex颜色转换为rgba
@@ -251,9 +253,18 @@ class WebPOptimizer {
     let fontFamily = 'sans-serif';
     if (fontPath && fs.existsSync(fontPath)) {
       try {
-        // 使用 @napi-rs/canvas 注册字体
-        GlobalFonts.registerFromPath(fontPath, 'CustomWatermarkFont');
-        fontFamily = 'CustomWatermarkFont';
+        // 使用字体路径的hash作为唯一标识，避免重复注册
+        const fontHash = require('crypto').createHash('md5').update(fontPath).digest('hex').substring(0, 8);
+        const fontName = `CustomWatermarkFont_${fontHash}`;
+        
+        // 检查字体是否已注册
+        const registeredFonts = GlobalFonts.families;
+        if (!registeredFonts.some(f => f.family === fontName)) {
+          GlobalFonts.registerFromPath(fontPath, fontName);
+          console.log(`WebP Optimizer: 注册自定义字体 - ${fontPath} (${fontName})`);
+        }
+        
+        fontFamily = fontName;
         console.log(`WebP Optimizer: 使用自定义字体 - ${fontPath}`);
       } catch (fontError) {
         console.error(`WebP Optimizer: 加载字体文件失败: ${fontError.message}`);
@@ -427,12 +438,16 @@ class WebPOptimizer {
         // 创建ImageData
         const imageData = ctx.createImageData(info.width, info.height);
         
+        // 优化: 使用 Uint8ClampedArray 批量处理像素数据
+        const srcData = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+        const dstData = imageData.data;
+        
         // 修改每个像素的alpha通道
-        for (let i = 0; i < data.length; i += 4) {
-          imageData.data[i] = data[i];     // R
-          imageData.data[i + 1] = data[i + 1]; // G
-          imageData.data[i + 2] = data[i + 2]; // B
-          imageData.data[i + 3] = Math.round(data[i + 3] * opacity); // A
+        for (let i = 0; i < srcData.length; i += 4) {
+          dstData[i] = srcData[i];         // R
+          dstData[i + 1] = srcData[i + 1]; // G
+          dstData[i + 2] = srcData[i + 2]; // B
+          dstData[i + 3] = Math.round(srcData[i + 3] * opacity); // A
         }
         
         ctx.putImageData(imageData, 0, 0);
