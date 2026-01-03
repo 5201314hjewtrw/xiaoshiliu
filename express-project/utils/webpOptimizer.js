@@ -11,6 +11,11 @@ const path = require('path');
 const fs = require('fs');
 const config = require('../config/config');
 
+// 常量定义
+const CHAR_WIDTH_RATIO = 0.6;  // 字符宽度估算比例
+const MAX_ALPHA = 255;         // Alpha通道最大值
+const DEFAULT_WATERMARK_PADDING = 20; // 水印默认边距（像素）
+
 /**
  * WebP优化器类
  */
@@ -115,7 +120,7 @@ class WebPOptimizer {
     }
     
     // 九宫格模式
-    const padding = 20; // 边距
+    const padding = DEFAULT_WATERMARK_PADDING;
     let x = 0;
     let y = 0;
     
@@ -177,13 +182,13 @@ class WebPOptimizer {
   createTextWatermarkSvg(text, fontSize, color, opacity) {
     // 将hex颜色转换为rgba
     const hexColor = color.replace('#', '');
-    const r = parseInt(hexColor.substr(0, 2), 16);
-    const g = parseInt(hexColor.substr(2, 2), 16);
-    const b = parseInt(hexColor.substr(4, 2), 16);
+    const r = parseInt(hexColor.substring(0, 2), 16);
+    const g = parseInt(hexColor.substring(2, 4), 16);
+    const b = parseInt(hexColor.substring(4, 6), 16);
     const a = opacity / 100;
     
     // 计算文字宽度（估算）
-    const charWidth = fontSize * 0.6;
+    const charWidth = fontSize * CHAR_WIDTH_RATIO;
     const width = Math.ceil(text.length * charWidth) + 20;
     const height = fontSize + 10;
     
@@ -260,7 +265,7 @@ class WebPOptimizer {
     const svgBuffer = this.createTextWatermarkSvg(text, fontSize, color, opacity);
     
     // 获取SVG尺寸估算
-    const charWidth = fontSize * 0.6;
+    const charWidth = fontSize * CHAR_WIDTH_RATIO;
     const watermarkWidth = Math.ceil(text.length * charWidth) + 20;
     const watermarkHeight = fontSize + 10;
     
@@ -331,7 +336,7 @@ class WebPOptimizer {
       // 获取水印Buffer并应用透明度
       const watermarkBuffer = await watermark
         .composite([{
-          input: Buffer.from([255, 255, 255, Math.round(opacity * 255)]),
+          input: Buffer.from([MAX_ALPHA, MAX_ALPHA, MAX_ALPHA, Math.round(opacity * MAX_ALPHA)]),
           raw: {
             width: 1,
             height: 1,
@@ -393,7 +398,7 @@ class WebPOptimizer {
     const svgBuffer = this.createTextWatermarkSvg(text, fontSize, color, opacity);
     
     // 获取SVG尺寸估算
-    const charWidth = fontSize * 0.6;
+    const charWidth = fontSize * CHAR_WIDTH_RATIO;
     const watermarkWidth = Math.ceil(text.length * charWidth) + 20;
     const watermarkHeight = fontSize + 10;
     
@@ -465,10 +470,10 @@ class WebPOptimizer {
           resizeOptions.withoutEnlargement = true;
           image = image.resize(resizeOptions);
           
-          // 更新metadata以反映新尺寸
-          const resizedBuffer = await image.toBuffer();
+          // 更新metadata以反映新尺寸 - 使用resolveWithObject获取info包含新尺寸
+          const { data: resizedBuffer, info } = await image.toBuffer({ resolveWithObject: true });
           image = sharp(resizedBuffer);
-          metadata = await image.metadata();
+          metadata = { ...metadata, width: info.width, height: info.height };
           
           console.log(`WebP Optimizer: 已缩放 - 新尺寸: ${metadata.width}x${metadata.height}`);
         }
