@@ -41,6 +41,8 @@ function transformPostData(backendPost) {
     // 认证状态字段
     verified: backendPost.verified || 0,
     author_verified: backendPost.verified || 0,
+    // 附件字段
+    attachment: backendPost.attachment || null,
     // 其他字段
     created_at: backendPost.created_at,
     path: `/post/${backendPost.id}`,
