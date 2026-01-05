@@ -3,6 +3,8 @@ const router = express.Router();
 const { HTTP_STATUS, RESPONSE_CODES } = require('../constants');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 const { authenticateToken } = require('../middleware/auth');
 const { uploadFile, uploadVideo, uploadImage } = require('../utils/uploadHelper');
 const transcodingQueue = require('../utils/transcodingQueue');
@@ -650,6 +652,102 @@ router.post('/chunk/merge/image', authenticateToken, async (req, res) => {
   }
 });
 
+// 文件过滤器 - 附件
+const attachmentFileFilter = (req, file, cb) => {
+  // 检查文件类型
+  const allowedTypes = config.upload.attachment?.allowedTypes || [
+    'application/zip',
+    'application/x-zip-compressed',
+    'application/x-rar-compressed',
+    'application/x-7z-compressed',
+    'application/gzip',
+    'application/x-tar',
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/plain'
+  ];
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('不支持的附件类型'), false);
+  }
+};
+
+// 配置 multer - 附件
+const attachmentUpload = multer({
+  storage: storage,
+  fileFilter: attachmentFileFilter,
+  limits: {
+    fileSize: config.upload.attachment?.maxSizeBytes || 50 * 1024 * 1024 // 50MB 限制
+  }
+});
+
+// 附件上传
+router.post('/attachment', authenticateToken, attachmentUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '没有上传文件' });
+    }
+
+    // 获取附件存储策略
+    const strategy = config.upload.attachment?.strategy || 'local';
+
+    let result;
+    if (strategy === 'local') {
+      // 保存到本地
+      const uploadDir = path.join(process.cwd(), config.upload.attachment?.local?.uploadDir || 'uploads/attachments');
+      
+      // 确保上传目录存在
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+
+      // 生成唯一文件名
+      const ext = path.extname(req.file.originalname);
+      const hash = crypto.createHash('md5').update(req.file.buffer).digest('hex');
+      const uniqueFilename = `${Date.now()}_${hash}${ext}`;
+      const filePath = path.join(uploadDir, uniqueFilename);
+
+      // 保存文件
+      fs.writeFileSync(filePath, req.file.buffer);
+
+      // 返回访问URL
+      const baseUrl = config.upload.attachment?.local?.baseUrl || 'http://localhost:3001';
+      const uploadPath = config.upload.attachment?.local?.uploadDir || 'uploads/attachments';
+      result = {
+        success: true,
+        url: `${baseUrl}/${uploadPath}/${uniqueFilename}`
+      };
+    } else {
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '不支持的上传策略' });
+    }
+
+    if (result.success) {
+      console.log(`附件上传成功 - 用户ID: ${req.user.id}, 文件名: ${req.file.originalname}`);
+
+      res.json({
+        code: RESPONSE_CODES.SUCCESS,
+        message: '上传成功',
+        data: {
+          originalname: req.file.originalname,
+          size: req.file.size,
+          url: result.url
+        }
+      });
+    } else {
+      res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: result.message || '附件上传失败' });
+    }
+  } catch (error) {
+    console.error('附件上传失败:', error);
+    res.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).json({ code: RESPONSE_CODES.ERROR, message: '上传失败' });
+  }
+});
+
 // 错误处理中间件
 router.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
@@ -661,7 +759,7 @@ router.use((error, req, res, next) => {
     }
   }
 
-  if (error.message === '只允许上传图片文件' || error.message === '只允许上传视频文件') {
+  if (error.message === '只允许上传图片文件' || error.message === '只允许上传视频文件' || error.message === '不支持的附件类型') {
     return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: error.message });
   }
 

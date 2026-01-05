@@ -200,6 +200,22 @@ CREATE TABLE `post_images`  (
 ) ENGINE = InnoDB AUTO_INCREMENT = 588 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '笔记图片表' ROW_FORMAT = Dynamic;
 
 -- ----------------------------
+-- Table structure for post_attachments
+-- ----------------------------
+DROP TABLE IF EXISTS `post_attachments`;
+CREATE TABLE `post_attachments`  (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '附件ID',
+  `post_id` bigint NOT NULL COMMENT '笔记ID',
+  `attachment_url` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '附件URL',
+  `filename` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '原始文件名',
+  `filesize` bigint NOT NULL DEFAULT 0 COMMENT '文件大小(字节)',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `idx_post_id`(`post_id` ASC) USING BTREE,
+  CONSTRAINT `post_attachments_ibfk_1` FOREIGN KEY (`post_id`) REFERENCES `posts` (`id`) ON DELETE CASCADE ON UPDATE RESTRICT
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '笔记附件表' ROW_FORMAT = Dynamic;
+
+-- ----------------------------
 -- Table structure for post_tags
 -- ----------------------------
 DROP TABLE IF EXISTS `post_tags`;
