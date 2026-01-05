@@ -479,9 +479,9 @@ router.post('/purchase-content', authenticateToken, async (req, res) => {
 
     console.log(`💵 [购买内容] 作者 ${post.user_id} 获得 ${authorEarnings} 石榴点`);
 
-    // 记录购买（包含author_id和purchase_type）
+    // 记录购买（包含author_id和purchase_type，同时设置created_at和purchased_at）
     await pool.execute(
-      'INSERT INTO user_purchased_content (user_id, post_id, author_id, price, purchase_type, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
+      'INSERT INTO user_purchased_content (user_id, post_id, author_id, price, purchase_type, created_at, purchased_at) VALUES (?, ?, ?, ?, ?, NOW(), NOW())',
       [userId.toString(), postId.toString(), post.user_id.toString(), price.toFixed(2), paymentSettings.payment_type || 'single']
     );
 
