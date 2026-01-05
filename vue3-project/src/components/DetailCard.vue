@@ -23,7 +23,7 @@
         <div class="image-section" :style="{ width: imageSectionWidth + 'px' }" @mouseenter="showImageControls = true"
           @mouseleave="showImageControls = false">
           <!-- 视频播放器（桌面端） -->
-          <div v-if="props.item.type === 2" class="video-container">
+          <div v-if="props.item.type === 2 && !isMobile" class="video-container">
             <ShakaVideoPlayer
               v-if="props.item.video_url"
               ref="videoPlayer"
@@ -93,7 +93,7 @@
 
           <div class="scrollable-content" ref="scrollableContent">
             <!-- 视频播放器（移动端） -->
-            <div v-if="props.item.type === 2" class="mobile-video-container">
+            <div v-if="props.item.type === 2 && isMobile" class="mobile-video-container">
               <ShakaVideoPlayer
                 v-if="props.item.video_url"
                 ref="mobileVideoPlayer"
