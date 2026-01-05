@@ -82,19 +82,16 @@ function protectPostListItem(post, options) {
   } else {
     // 图文笔记
     let images = imageUrls || [];
-    let coverImage = images.length > 0 ? images[0] : null;
     
-    // 保护付费图片：限制为免费预览数量
-    // 但始终至少显示1张图片作为封面（用户体验更好）
+    // 保护付费图片：严格按照作者设置的免费预览数量限制
     if (protect) {
-      const minPreview = Math.max(1, freeCount);
-      if (images.length > minPreview) {
-        images = images.slice(0, minPreview);
+      if (images.length > freeCount) {
+        images = images.slice(0, freeCount);
       }
     }
     post.images = images;
-    // 封面图始终显示第一张（即使是付费内容也显示封面）
-    post.image = coverImage;
+    // 封面图：如果有免费预览图片则显示第一张，否则不显示
+    post.image = images.length > 0 ? images[0] : null;
   }
   
   post.isPaidContent = paid;
@@ -109,11 +106,9 @@ function protectPostListItem(post, options) {
 function protectPostDetail(post, options = {}) {
   const freePreviewCount = options.freePreviewCount || 0;
   
-  // 限制图片数量为免费预览数量
-  // 但始终至少显示1张图片作为封面（用户体验更好）
-  const minPreview = Math.max(1, freePreviewCount);
-  if (post.images && post.images.length > minPreview) {
-    post.images = post.images.slice(0, minPreview);
+  // 严格按照作者设置的免费预览数量限制图片
+  if (post.images && post.images.length > freePreviewCount) {
+    post.images = post.images.slice(0, freePreviewCount);
   }
   
   // 隐藏视频URL（只保留封面图用于预览）
