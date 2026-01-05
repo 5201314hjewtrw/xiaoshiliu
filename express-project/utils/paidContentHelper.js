@@ -26,7 +26,7 @@ function shouldProtectContent(paymentSetting, isAuthor, hasPurchased) {
 }
 
 /**
- * 获取免费预览数量（已废弃，保留向后兼容）
+ * 获取免费预览数量
  * @param {Object} paymentSetting - 付费设置对象
  * @returns {number} 免费预览图片数量
  */
@@ -64,13 +64,14 @@ function safeUnicodeTruncate(text, maxLength) {
  * @param {boolean} options.isAuthor - 是否为作者
  * @param {boolean} options.hasPurchased - 是否已购买
  * @param {Object} options.videoData - 视频数据
- * @param {Array} options.imageData - 图片数据列表 [{url: string, is_free: number}]
+ * @param {Array} options.imageUrls - 图片URL列表
  */
 function protectPostListItem(post, options) {
-  const { paymentSetting, isAuthor, hasPurchased, videoData, imageData } = options;
+  const { paymentSetting, isAuthor, hasPurchased, videoData, imageUrls } = options;
   
   const paid = isPaidContent(paymentSetting);
   const protect = shouldProtectContent(paymentSetting, isAuthor, hasPurchased);
+  const freeCount = getFreePreviewCount(paymentSetting);
   
   if (post.type === 2) {
     // 视频笔记
@@ -80,22 +81,17 @@ function protectPostListItem(post, options) {
     post.image = videoData && videoData.cover_url ? videoData.cover_url : null;
   } else {
     // 图文笔记
-    let images = imageData || [];
+    let images = imageUrls || [];
     
-    // 将图片数据按 is_free 排序：免费的在前
-    images = [...images].sort((a, b) => (b.is_free || 0) - (a.is_free || 0));
-    
-    // 保护付费图片：只显示标记为免费的图片
+    // 保护付费图片：严格按照作者设置的免费预览数量限制
     if (protect) {
-      images = images.filter(img => img.is_free === 1);
+      if (images.length > freeCount) {
+        images = images.slice(0, freeCount);
+      }
     }
-    
-    // 提取URL列表
-    const imageUrls = images.map(img => img.url || img.image_url);
-    
-    post.images = imageUrls;
-    // 封面图：如果有图片则显示第一张（免费图片在前）
-    post.image = imageUrls.length > 0 ? imageUrls[0] : null;
+    post.images = images;
+    // 封面图：如果有免费预览图片则显示第一张，否则不显示
+    post.image = images.length > 0 ? images[0] : null;
   }
   
   post.isPaidContent = paid;
@@ -105,17 +101,15 @@ function protectPostListItem(post, options) {
  * 保护帖子详情中的付费内容
  * @param {Object} post - 帖子对象
  * @param {Object} options - 选项
- * @param {Array} options.imageData - 图片数据列表 [{url: string, is_free: number}]
+ * @param {number} options.freePreviewCount - 免费预览数量
  */
 function protectPostDetail(post, options = {}) {
-  const imageData = options.imageData || [];
+  const freePreviewCount = options.freePreviewCount || 0;
   
-  // 将图片按 is_free 排序：免费的在前
-  let sortedImages = [...imageData].sort((a, b) => (b.is_free || 0) - (a.is_free || 0));
-  
-  // 只显示标记为免费的图片
-  const freeImages = sortedImages.filter(img => img.is_free === 1);
-  post.images = freeImages.map(img => img.url || img.image_url);
+  // 严格按照作者设置的免费预览数量限制图片
+  if (post.images && post.images.length > freePreviewCount) {
+    post.images = post.images.slice(0, freePreviewCount);
+  }
   
   // 隐藏视频URL（只保留封面图用于预览）
   if (post.type === 2) {
