@@ -44,13 +44,13 @@
           <!-- 图片轮播（图文笔记） -->
           <div v-else class="image-container">
             <div class="image-slider" :style="{ transform: `translateX(-${currentImageIndex * 100}%)` }">
-              <img v-for="(image, index) in imageList" :key="index" 
+              <img v-for="(image, index) in displayImageList" :key="index" 
                 :src="showContent ? image : (index === 0 ? props.item.image : '')" 
                 :alt="props.item.title || '图片'"
                 @load="handleImageLoad($event, index)" :style="{ objectFit: 'contain' }"
                 class="slider-image image-zoomable" @click="openImageViewer" />
             </div>
-            <div v-if="hasMultipleImages && showContent" class="image-controls" :class="{ 'visible': showImageControls }">
+            <div v-if="hasMultipleDisplayImages && showContent" class="image-controls" :class="{ 'visible': showImageControls }">
               <div class="nav-btn-container prev-btn-container" @click.stop>
                 <button class="nav-btn prev-btn" @click="prevImage" :disabled="currentImageIndex === 0"
                   v-show="currentImageIndex > 0">
@@ -60,15 +60,20 @@
 
               <div class="nav-btn-container next-btn-container" @click.stop>
                 <button class="nav-btn next-btn" @click="nextImage"
-                  :disabled="currentImageIndex === imageList.length - 1"
-                  v-show="currentImageIndex < imageList.length - 1">
+                  :disabled="currentImageIndex === displayImageList.length - 1"
+                  v-show="currentImageIndex < displayImageList.length - 1">
                   <SvgIcon name="right" width="20" height="20" />
                 </button>
               </div>
 
               <div class="image-counter">
-                {{ currentImageIndex + 1 }}/{{ imageList.length }}
+                {{ currentImageIndex + 1 }}/{{ displayImageList.length }}
               </div>
+            </div>
+            <!-- 付费内容图片区域遮罩 -->
+            <div v-if="showPaymentOverlay && displayImageList.length === 0" class="image-payment-overlay">
+              <div class="payment-lock-icon">🔒</div>
+              <div class="payment-text">付费内容</div>
             </div>
           </div>
         </div>
@@ -112,39 +117,49 @@
               </div>
             </div>
             <!-- 图片轮播（图文笔记） -->
-            <div v-else-if="imageList && imageList.length > 0" class="mobile-image-container">
+            <div v-else-if="displayImageList && displayImageList.length > 0" class="mobile-image-container">
               <div class="mobile-image-slider" :style="{ transform: `translateX(-${currentImageIndex * 100}%)` }"
                 @touchstart="handleTouchStart" @touchmove="handleTouchMove" @touchend="handleTouchEnd">
-                <img v-for="(image, index) in imageList" :key="index" 
+                <img v-for="(image, index) in displayImageList" :key="index" 
                   :src="showContent ? image : (index === 0 ? props.item.image : '')" 
                   :alt="`图片 ${index + 1}`"
                   class="mobile-slider-image" @click="openImageViewer" @load="handleImageLoad($event, index)" />
               </div>
 
 
-              <div v-if="hasMultipleImages" class="mobile-image-controls">
+              <div v-if="hasMultipleDisplayImages" class="mobile-image-controls">
                 <button class="mobile-nav-btn mobile-prev-btn" @click="prevImage" :disabled="currentImageIndex === 0">
                   <SvgIcon name="left" width="20" height="20" />
                 </button>
                 <button class="mobile-nav-btn mobile-next-btn" @click="nextImage"
-                  :disabled="currentImageIndex === imageList.length - 1">
+                  :disabled="currentImageIndex === displayImageList.length - 1">
                   <SvgIcon name="right" width="20" height="20" />
                 </button>
                 <div class="mobile-image-counter">
-                  {{ currentImageIndex + 1 }}/{{ imageList.length }}
+                  {{ currentImageIndex + 1 }}/{{ displayImageList.length }}
                 </div>
               </div>
             </div>
-            <div v-if="imageList.length > 1" class="mobile-dots-indicator">
+            <!-- 付费内容无图片时的占位 -->
+            <div v-else-if="showPaymentOverlay && imageList.length > 0" class="mobile-image-container mobile-payment-placeholder">
+              <div class="image-payment-overlay">
+                <div class="payment-lock-icon">🔒</div>
+                <div class="payment-text">付费内容</div>
+              </div>
+            </div>
+            <div v-if="displayImageList.length > 1" class="mobile-dots-indicator">
               <div class="mobile-dots">
-                <span v-for="(image, index) in imageList" :key="index" class="mobile-dot"
+                <span v-for="(image, index) in displayImageList" :key="index" class="mobile-dot"
                   :class="{ active: index === currentImageIndex }" @click="goToImage(index)"></span>
               </div>
             </div>
             <div class="post-content">
               <h2 class="post-title">{{ postData.title }}</h2>
               <p class="post-text">
-                <ContentRenderer :text="postData.content" />
+                <ContentRenderer :text="displayContent" />
+                <span v-if="showPaymentOverlay && postData.content.length > 50" class="content-locked-hint">
+                  （内容已隐藏，解锁后查看完整内容）
+                </span>
               </p>
               <!-- 附件下载区域 - 付费内容时隐藏 -->
               <div v-if="postData.attachment && postData.attachment.url && !showPaymentOverlay" class="attachment-download">
@@ -436,7 +451,7 @@
       @confirm="handleImageUploadConfirm" @update:model-value="handleImageUploadChange" />
 
     <!-- 帖子图片查看器 -->
-    <ImageViewer :visible="showImageViewer" :images="imageList" :initial-index="currentImageIndex" image-type="post"
+    <ImageViewer :visible="showImageViewer" :images="displayImageList" :initial-index="currentImageIndex" image-type="post"
       @close="closeImageViewer" @change="handleImageIndexChange" />
 
     <!-- 评论图片查看器 -->
@@ -626,6 +641,17 @@ const hiddenImageCount = computed(() => {
   return Math.max(0, imageList.value.length - freePreviewCount.value)
 })
 
+// 实际显示的图片列表（付费内容时只显示免费预览的图片）
+const displayImageList = computed(() => {
+  if (showPaymentOverlay.value) {
+    return visibleImageList.value
+  }
+  return imageList.value
+})
+
+// 是否有多张可显示的图片
+const hasMultipleDisplayImages = computed(() => displayImageList.value.length > 1)
+
 // 移动端检测
 const isMobile = computed(() => windowWidth.value <= 768)
 
@@ -767,6 +793,19 @@ const postData = computed(() => {
     attachment: props.item.attachment || null
   }
   return data
+})
+
+// 付费内容时显示的截断内容
+const displayContent = computed(() => {
+  const fullContent = postData.value.content
+  if (!showPaymentOverlay.value) {
+    return fullContent
+  }
+  // 付费内容只显示前50个字符
+  if (fullContent.length > 50) {
+    return fullContent.substring(0, 50) + '...'
+  }
+  return fullContent
 })
 
 // 格式化附件大小
@@ -3295,6 +3334,14 @@ function handleAvatarError(event) {
   color: var(--text-color-secondary);
 }
 
+.content-locked-hint {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-color-tertiary);
+  font-size: 13px;
+  font-style: italic;
+}
+
 .payment-price {
   display: flex;
   align-items: center;
@@ -3339,6 +3386,38 @@ function handleAvatarError(event) {
 .unlock-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* 图片区域付费遮罩 */
+.image-payment-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.85));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.image-payment-overlay .payment-lock-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.image-payment-overlay .payment-text {
+  color: white;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.mobile-payment-placeholder {
+  min-height: 200px;
+  background: var(--bg-color-secondary);
+  position: relative;
 }
 
 .post-tags {
