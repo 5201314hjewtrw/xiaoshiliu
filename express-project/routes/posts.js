@@ -69,8 +69,11 @@ router.get('/', optionalAuth, async (req, res) => {
           // 为瀑布流设置image字段
           post.image = videos.length > 0 && videos[0].cover_url ? videos[0].cover_url : null;
         } else {
-          // 图文笔记：获取笔记图片
-          const [images] = await pool.execute('SELECT image_url FROM post_images WHERE post_id = ?', [post.id]);
+          // 图文笔记：获取笔记图片（包含is_free字段，按is_free DESC排序使免费图片在前）
+          const [images] = await pool.execute(
+            'SELECT image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id = ? ORDER BY is_free DESC, id ASC',
+            [post.id]
+          );
           post.images = images.map(img => img.image_url);
           // 为瀑布流设置image字段（取第一张图片）
           post.image = images.length > 0 ? images[0].image_url : null;
@@ -208,9 +211,9 @@ router.get('/', optionalAuth, async (req, res) => {
       const postIds = rows.map(post => post.id);
       const placeholders = postIds.map(() => '?').join(',');
       
-      // 批量获取所有图片
+      // 批量获取所有图片（包含is_free字段，按is_free DESC排序使免费图片在前）
       const [allImages] = await pool.execute(
-        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id IN (${placeholders}) ORDER BY is_free DESC, id ASC`,
         postIds
       );
       const imagesByPostId = {};
@@ -218,7 +221,7 @@ router.get('/', optionalAuth, async (req, res) => {
         if (!imagesByPostId[img.post_id]) {
           imagesByPostId[img.post_id] = [];
         }
-        imagesByPostId[img.post_id].push(img.image_url);
+        imagesByPostId[img.post_id].push({ url: img.image_url, is_free: img.is_free });
       });
       
       // 批量获取所有视频
@@ -295,7 +298,7 @@ router.get('/', optionalAuth, async (req, res) => {
           isAuthor,
           hasPurchased,
           videoData: videosByPostId[post.id],
-          imageUrls: imagesByPostId[post.id]
+          imageData: imagesByPostId[post.id]
         });
         
         post.tags = tagsByPostId[post.id] || [];
@@ -461,9 +464,9 @@ router.get('/following', authenticateToken, async (req, res) => {
       // 创建占位符字符串和参数数组
       const placeholders = postIds.map(() => '?').join(',');
 
-      // 批量获取所有图片
+      // 批量获取所有图片（包含is_free字段，按is_free DESC排序使免费图片在前）
       const [allImages] = await pool.execute(
-        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id IN (${placeholders}) ORDER BY is_free DESC, id ASC`,
         postIds
       );
       const imagesByPostId = {};
@@ -471,7 +474,7 @@ router.get('/following', authenticateToken, async (req, res) => {
         if (!imagesByPostId[img.post_id]) {
           imagesByPostId[img.post_id] = [];
         }
-        imagesByPostId[img.post_id].push(img.image_url);
+        imagesByPostId[img.post_id].push({ url: img.image_url, is_free: img.is_free });
       });
 
       // 批量获取所有视频
@@ -542,7 +545,7 @@ router.get('/following', authenticateToken, async (req, res) => {
           isAuthor,
           hasPurchased,
           videoData: videosByPostId[post.id],
-          imageUrls: imagesByPostId[post.id]
+          imageData: imagesByPostId[post.id]
         });
         
         post.tags = tagsByPostId[post.id] || [];
@@ -609,8 +612,13 @@ router.get('/:id', optionalAuth, async (req, res) => {
 
     // 根据帖子类型获取对应的媒体文件
     if (post.type === 1) {
-      // 图文类型：获取图片
-      const [images] = await pool.execute('SELECT image_url FROM post_images WHERE post_id = ?', [postId]);
+      // 图文类型：获取图片（包含is_free字段，按is_free DESC排序使免费图片在前）
+      const [images] = await pool.execute(
+        'SELECT image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id = ? ORDER BY is_free DESC, id ASC',
+        [postId]
+      );
+      // 存储原始图片数据用于后续保护逻辑
+      post._imageData = images.map(img => ({ url: img.image_url, is_free: img.is_free }));
       post.images = images.map(img => img.image_url);
     } else if (post.type === 2) {
       // 视频类型：获取视频
@@ -679,10 +687,13 @@ router.get('/:id', optionalAuth, async (req, res) => {
     // 保护付费内容：如果是付费内容且用户未购买且不是作者，使用助手函数隐藏付费部分
     if (post.paymentSettings && post.paymentSettings.enabled && !hasPurchased && !isAuthor) {
       protectPostDetail(post, {
-        freePreviewCount: post.paymentSettings.freePreviewCount || 0
+        imageData: post._imageData || []
       });
       console.log(`🔒 [帖子详情] 付费内容已保护 - 帖子ID: ${postId}, 用户ID: ${currentUserId || '未登录'}`);
     }
+    
+    // 清理临时数据
+    delete post._imageData;
 
     // 检查当前用户是否已点赞和收藏（仅在用户已登录时检查）
     if (currentUserId) {
@@ -770,20 +781,28 @@ router.post('/', authenticateToken, async (req, res) => {
 
     // 处理图片（图文类型）
     if (postType === 1 && images && images.length > 0) {
-      const validUrls = []
+      const validImages = []
 
-      // 处理所有有效的URL
-      for (const imageUrl of images) {
-        if (imageUrl && typeof imageUrl === 'string') {
-          validUrls.push(imageUrl)
+      // 处理所有有效的图片
+      // 支持两种格式：
+      // 1. 字符串URL（向后兼容，默认为免费）
+      // 2. 对象格式 {url: "...", isFree: boolean}
+      for (const image of images) {
+        if (typeof image === 'string' && image) {
+          // 旧格式：字符串URL，默认为免费
+          validImages.push({ url: image, isFree: true })
+        } else if (image && typeof image === 'object' && image.url && typeof image.url === 'string') {
+          // 新格式：对象包含url和isFree
+          validImages.push({ url: image.url, isFree: image.isFree !== false }) // 默认为true
         }
       }
 
-      // 插入所有有效的图片URL
-      for (const imageUrl of validUrls) {
+      // 插入所有有效的图片，免费图片排在前面
+      const sortedImages = [...validImages].sort((a, b) => (b.isFree ? 1 : 0) - (a.isFree ? 1 : 0));
+      for (const img of sortedImages) {
         await pool.execute(
-          'INSERT INTO post_images (post_id, image_url) VALUES (?, ?)',
-          [postId.toString(), imageUrl]
+          'INSERT INTO post_images (post_id, image_url, is_free) VALUES (?, ?, ?)',
+          [postId.toString(), img.url, img.isFree ? 1 : 0]
         );
       }
     }
@@ -954,9 +973,9 @@ router.get('/search', optionalAuth, async (req, res) => {
       const postIds = rows.map(post => post.id);
       const placeholders = postIds.map(() => '?').join(',');
       
-      // 批量获取所有图片
+      // 批量获取所有图片（包含is_free字段，按is_free DESC排序使免费图片在前）
       const [allImages] = await pool.execute(
-        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id IN (${placeholders}) ORDER BY is_free DESC, id ASC`,
         postIds
       );
       const imagesByPostId = {};
@@ -964,7 +983,7 @@ router.get('/search', optionalAuth, async (req, res) => {
         if (!imagesByPostId[img.post_id]) {
           imagesByPostId[img.post_id] = [];
         }
-        imagesByPostId[img.post_id].push(img.image_url);
+        imagesByPostId[img.post_id].push({ url: img.image_url, is_free: img.is_free });
       });
       
       // 批量获取所有标签
@@ -1031,7 +1050,7 @@ router.get('/search', optionalAuth, async (req, res) => {
           isAuthor,
           hasPurchased,
           videoData: null, // 搜索结果不包含视频数据
-          imageUrls: imagesByPostId[post.id]
+          imageData: imagesByPostId[post.id]
         });
         
         post.tags = tagsByPostId[post.id] || [];
@@ -1312,20 +1331,28 @@ router.put('/:id', authenticateToken, async (req, res) => {
       await pool.execute('DELETE FROM post_images WHERE post_id = ?', [postId.toString()]);
 
       if (images && images.length > 0) {
-        const validUrls = []
+        const validImages = []
 
-        // 处理所有有效的URL
-        for (const imageUrl of images) {
-          if (imageUrl && typeof imageUrl === 'string') {
-            validUrls.push(imageUrl)
+        // 处理所有有效的图片
+        // 支持两种格式：
+        // 1. 字符串URL（向后兼容，默认为免费）
+        // 2. 对象格式 {url: "...", isFree: boolean}
+        for (const image of images) {
+          if (typeof image === 'string' && image) {
+            // 旧格式：字符串URL，默认为免费
+            validImages.push({ url: image, isFree: true })
+          } else if (image && typeof image === 'object' && image.url && typeof image.url === 'string') {
+            // 新格式：对象包含url和isFree
+            validImages.push({ url: image.url, isFree: image.isFree !== false }) // 默认为true
           }
         }
 
-        // 插入所有有效的图片URL
-        for (const imageUrl of validUrls) {
+        // 插入所有有效的图片，免费图片排在前面
+        const sortedImages = [...validImages].sort((a, b) => (b.isFree ? 1 : 0) - (a.isFree ? 1 : 0));
+        for (const img of sortedImages) {
           await pool.execute(
-            'INSERT INTO post_images (post_id, image_url) VALUES (?, ?)',
-            [postId, imageUrl]
+            'INSERT INTO post_images (post_id, image_url, is_free) VALUES (?, ?, ?)',
+            [postId.toString(), img.url, img.isFree ? 1 : 0]
           );
         }
       }

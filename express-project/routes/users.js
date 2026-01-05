@@ -274,9 +274,9 @@ router.get('/:id/posts', optionalAuth, async (req, res) => {
       const postIds = rows.map(post => post.id);
       const placeholders = postIds.map(() => '?').join(',');
       
-      // 批量获取所有图片
+      // 批量获取所有图片（包含is_free字段，按is_free DESC排序使免费图片在前）
       const [allImages] = await pool.execute(
-        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id IN (${placeholders}) ORDER BY is_free DESC, id ASC`,
         postIds
       );
       const imagesByPostId = {};
@@ -284,7 +284,7 @@ router.get('/:id/posts', optionalAuth, async (req, res) => {
         if (!imagesByPostId[img.post_id]) {
           imagesByPostId[img.post_id] = [];
         }
-        imagesByPostId[img.post_id].push(img.image_url);
+        imagesByPostId[img.post_id].push({ url: img.image_url, is_free: img.is_free });
       });
       
       // 批量获取所有视频
@@ -361,7 +361,7 @@ router.get('/:id/posts', optionalAuth, async (req, res) => {
           isAuthor,
           hasPurchased,
           videoData: videosByPostId[post.id],
-          imageUrls: imagesByPostId[post.id]
+          imageData: imagesByPostId[post.id]
         });
         
         post.tags = tagsByPostId[post.id] || [];
@@ -428,9 +428,9 @@ router.get('/:id/collections', optionalAuth, async (req, res) => {
       const postIds = rows.map(post => post.id);
       const placeholders = postIds.map(() => '?').join(',');
       
-      // 批量获取所有图片
+      // 批量获取所有图片（包含is_free字段，按is_free DESC排序使免费图片在前）
       const [allImages] = await pool.execute(
-        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id IN (${placeholders}) ORDER BY is_free DESC, id ASC`,
         postIds
       );
       const imagesByPostId = {};
@@ -438,7 +438,7 @@ router.get('/:id/collections', optionalAuth, async (req, res) => {
         if (!imagesByPostId[img.post_id]) {
           imagesByPostId[img.post_id] = [];
         }
-        imagesByPostId[img.post_id].push(img.image_url);
+        imagesByPostId[img.post_id].push({ url: img.image_url, is_free: img.is_free });
       });
       
       // 批量获取所有视频
@@ -515,7 +515,7 @@ router.get('/:id/collections', optionalAuth, async (req, res) => {
           isAuthor,
           hasPurchased,
           videoData: videosByPostId[post.id],
-          imageUrls: imagesByPostId[post.id]
+          imageData: imagesByPostId[post.id]
         });
         
         post.tags = tagsByPostId[post.id] || [];
@@ -582,9 +582,9 @@ router.get('/:id/likes', optionalAuth, async (req, res) => {
       const postIds = rows.map(post => post.id);
       const placeholders = postIds.map(() => '?').join(',');
       
-      // 批量获取所有图片
+      // 批量获取所有图片（包含is_free字段，按is_free DESC排序使免费图片在前）
       const [allImages] = await pool.execute(
-        `SELECT post_id, image_url FROM post_images WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, image_url, COALESCE(is_free, 1) as is_free FROM post_images WHERE post_id IN (${placeholders}) ORDER BY is_free DESC, id ASC`,
         postIds
       );
       const imagesByPostId = {};
@@ -592,7 +592,7 @@ router.get('/:id/likes', optionalAuth, async (req, res) => {
         if (!imagesByPostId[img.post_id]) {
           imagesByPostId[img.post_id] = [];
         }
-        imagesByPostId[img.post_id].push(img.image_url);
+        imagesByPostId[img.post_id].push({ url: img.image_url, is_free: img.is_free });
       });
       
       // 批量获取所有视频
@@ -669,7 +669,7 @@ router.get('/:id/likes', optionalAuth, async (req, res) => {
           isAuthor,
           hasPurchased,
           videoData: videosByPostId[post.id],
-          imageUrls: imagesByPostId[post.id]
+          imageData: imagesByPostId[post.id]
         });
         
         post.tags = tagsByPostId[post.id] || [];
