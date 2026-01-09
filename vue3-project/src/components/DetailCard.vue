@@ -598,7 +598,50 @@ const hasPurchased = computed(() => {
 })
 
 // 是否需要显示付费遮挡
+// 只有在付费内容且未购买且没有免费预览图片时才显示遮挡
 const showPaymentOverlay = computed(() => {
+  const isPaid = isPaidContent.value && !hasPurchased.value
+  if (!isPaid) return false
+  
+  // 检查是否有免费图片
+  const hasIsFreePreviewProp = rawImages.value.some(img => typeof img === 'object' && img.isFreePreview !== undefined)
+  if (hasIsFreePreviewProp) {
+    // 新格式：检查是否有任何免费图片
+    const hasFreeImages = rawImages.value.some(img => typeof img === 'object' && img.isFreePreview === true)
+    // 如果有免费图片，不显示遮挡（让用户可以查看免费图片）
+    if (hasFreeImages) {
+      console.log('🔧 [DetailCard] 有免费图片，不显示遮挡')
+      return false
+    }
+  } else {
+    // 旧格式：检查freePreviewCount
+    if (freePreviewCount.value > 0) {
+      console.log('🔧 [DetailCard] freePreviewCount > 0，不显示遮挡')
+      return false
+    }
+  }
+  
+  // 没有免费图片，显示遮挡
+  console.log('🔧 [DetailCard] 没有免费图片，显示遮挡')
+  return true
+})
+
+// 是否有隐藏的付费图片（用于显示解锁提示）
+const hasHiddenPaidImages = computed(() => {
+  if (!isPaidContent.value || hasPurchased.value) return false
+  
+  const hasIsFreePreviewProp = rawImages.value.some(img => typeof img === 'object' && img.isFreePreview !== undefined)
+  if (hasIsFreePreviewProp) {
+    // 新格式：检查是否有付费图片
+    return rawImages.value.some(img => typeof img === 'object' && img.isFreePreview === false)
+  } else {
+    // 旧格式：检查是否有超过freePreviewCount的图片
+    return imageList.value.length > freePreviewCount.value
+  }
+})
+
+// 是否需要过滤图片（付费内容未购买时只显示免费图片）
+const shouldFilterImages = computed(() => {
   return isPaidContent.value && !hasPurchased.value
 })
 
@@ -638,12 +681,12 @@ const rawImages = computed(() => {
 const visibleImageList = computed(() => {
   const allImages = imageList.value
   console.log('🔧 [DetailCard] visibleImageList 计算:')
-  console.log('🔧 [DetailCard] showPaymentOverlay:', showPaymentOverlay.value)
+  console.log('🔧 [DetailCard] shouldFilterImages:', shouldFilterImages.value)
   console.log('🔧 [DetailCard] allImages.length:', allImages.length)
   console.log('🔧 [DetailCard] rawImages.value:', rawImages.value)
   
-  if (!showPaymentOverlay.value) {
-    console.log('🔧 [DetailCard] 不需要遮挡，返回所有图片')
+  if (!shouldFilterImages.value) {
+    console.log('🔧 [DetailCard] 不需要过滤，返回所有图片')
     return allImages
   }
   
@@ -673,7 +716,7 @@ const visibleImageList = computed(() => {
 
 // 被隐藏的图片数量
 const hiddenImageCount = computed(() => {
-  if (!showPaymentOverlay.value) return 0
+  if (!shouldFilterImages.value) return 0
   
   // 检查图片是否有 isFreePreview 属性
   const imagesWithFreePreviewProp = rawImages.value.filter(img => typeof img === 'object' && img.isFreePreview !== undefined)
@@ -688,15 +731,16 @@ const hiddenImageCount = computed(() => {
 // 实际显示的图片列表（付费内容时只显示免费预览的图片）
 const displayImageList = computed(() => {
   console.log('🔧 [DetailCard] displayImageList 计算:')
-  console.log('🔧 [DetailCard] showPaymentOverlay:', showPaymentOverlay.value)
+  console.log('🔧 [DetailCard] shouldFilterImages:', shouldFilterImages.value)
   console.log('🔧 [DetailCard] visibleImageList:', visibleImageList.value)
   console.log('🔧 [DetailCard] imageList:', imageList.value)
   
-  if (showPaymentOverlay.value) {
-    console.log('🔧 [DetailCard] 返回 visibleImageList (需要付费遮挡)')
+  // 如果需要过滤图片（付费内容未购买），使用过滤后的列表
+  if (shouldFilterImages.value) {
+    console.log('🔧 [DetailCard] 返回 visibleImageList (需要过滤)')
     return visibleImageList.value
   }
-  console.log('🔧 [DetailCard] 返回 imageList (不需要付费遮挡)')
+  console.log('🔧 [DetailCard] 返回 imageList (不需要过滤)')
   return imageList.value
 })
 
