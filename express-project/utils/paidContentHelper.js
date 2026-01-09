@@ -97,9 +97,10 @@ function protectPostListItem(post, options) {
       if (hasIsFreePreviewProp) {
         // 使用isFreePreview属性过滤，只保留标记为免费的图片
         images = images.filter(img => typeof img === 'object' && img.isFreePreview === true);
-        // 如果所有图片都是付费的，至少显示第一张作为封面（模糊显示）
-        if (images.length === 0 && imageUrls && imageUrls.length > 0) {
-          images = [imageUrls[0]];
+        // 如果所有图片都是付费的，返回空数组
+        // 前端会根据paymentOverlay显示模糊封面图作为预览
+        if (images.length === 0) {
+          images = [];
         }
       } else {
         // 旧格式：使用freePreviewCount

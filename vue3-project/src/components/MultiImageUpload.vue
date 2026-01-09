@@ -632,7 +632,9 @@ const syncWithUrls = (images) => {
   for (let i = 0; i < images.length; i++) {
     const image = images[i]
     let url = null
-    let isFreePreview = i === 0 // 默认第一张为免费预览
+    // 业务规则：新图片默认第一张为免费预览，其余为付费内容
+    // 用户可以通过点击图片的付费/免费标签来切换状态
+    let isFreePreview = i === 0
     
     // 处理字符串URL格式
     if (typeof image === 'string') {
@@ -640,6 +642,7 @@ const syncWithUrls = (images) => {
     } else if (image && typeof image === 'object') {
       // 处理对象格式（包含url和isFreePreview属性）
       url = image.url || image.preview || image
+      // 如果对象中已有isFreePreview属性，使用该值；否则使用默认规则
       isFreePreview = image.isFreePreview !== undefined ? image.isFreePreview : (i === 0)
     }
 
