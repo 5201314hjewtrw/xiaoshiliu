@@ -44,12 +44,30 @@
           <!-- 图片轮播（图文笔记） -->
           <div v-else class="image-container" :class="{ 'has-payment-overlay': showPaymentOverlay }">
             <!-- 当有图片可显示时 -->
-            <div v-if="displayImageList.length > 0" class="image-slider" :style="{ transform: `translateX(-${currentImageIndex * 100}%)` }">
-              <img v-for="(image, index) in displayImageList" :key="index" 
-                :src="showContent ? image : (index === 0 ? props.item.image : '')" 
-                :alt="props.item.title || '图片'"
-                @load="handleImageLoad($event, index)" :style="{ objectFit: 'contain' }"
-                class="slider-image image-zoomable" :class="{ 'blurred': showPaymentOverlay }" @click="!showPaymentOverlay && openImageViewer()" />
+            <div v-if="displayImageListWithUnlock.length > 0" class="image-slider" :style="{ transform: `translateX(-${currentImageIndex * 100}%)` }">
+              <template v-for="(image, index) in displayImageListWithUnlock" :key="index">
+                <!-- 解锁占位图 -->
+                <div v-if="isUnlockPlaceholder(image)" class="unlock-slide">
+                  <div class="unlock-slide-content">
+                    <div class="unlock-icon">🔒</div>
+                    <div class="unlock-text">还有 {{ hiddenImageCount }} 张付费图片</div>
+                    <div class="unlock-price">
+                      <span class="price-icon">🍒</span>
+                      <span class="price-value">{{ paymentSettings?.price || 0 }}</span>
+                      <span class="price-unit">石榴点</span>
+                    </div>
+                    <button class="unlock-btn" @click="handleUnlockContent" :disabled="isUnlocking">
+                      {{ isUnlocking ? '解锁中...' : '立即解锁查看全部' }}
+                    </button>
+                  </div>
+                </div>
+                <!-- 正常图片 -->
+                <img v-else
+                  :src="showContent ? image : (index === 0 ? props.item.image : '')" 
+                  :alt="props.item.title || '图片'"
+                  @load="handleImageLoad($event, index)" :style="{ objectFit: 'contain' }"
+                  class="slider-image image-zoomable" @click="openImageViewer()" />
+              </template>
             </div>
             <!-- 当没有可显示的图片（全部付费）时，显示第一张图片作为背景模糊 -->
             <div v-else-if="showPaymentOverlay && imageList.length > 0" class="image-slider">
@@ -58,7 +76,7 @@
                 :style="{ objectFit: 'contain' }"
                 class="slider-image blurred" />
             </div>
-            <div v-if="hasMultipleDisplayImages && showContent && !showPaymentOverlay" class="image-controls" :class="{ 'visible': showImageControls }">
+            <div v-if="displayImageListWithUnlock.length > 1 && showContent" class="image-controls" :class="{ 'visible': showImageControls }">
               <div class="nav-btn-container prev-btn-container" @click.stop>
                 <button class="nav-btn prev-btn" @click="prevImage" :disabled="currentImageIndex === 0"
                   v-show="currentImageIndex > 0">
@@ -68,14 +86,14 @@
 
               <div class="nav-btn-container next-btn-container" @click.stop>
                 <button class="nav-btn next-btn" @click="nextImage"
-                  :disabled="currentImageIndex === displayImageList.length - 1"
-                  v-show="currentImageIndex < displayImageList.length - 1">
+                  :disabled="currentImageIndex === displayImageListWithUnlock.length - 1"
+                  v-show="currentImageIndex < displayImageListWithUnlock.length - 1">
                   <SvgIcon name="right" width="20" height="20" />
                 </button>
               </div>
 
               <div class="image-counter">
-                {{ currentImageIndex + 1 }}/{{ displayImageList.length }}
+                {{ currentImageIndex + 1 }}/{{ displayImageListWithUnlock.length }}
               </div>
             </div>
             <!-- 付费内容图片区域遮罩 - 始终显示在付费内容上 -->
@@ -133,14 +151,32 @@
               </div>
             </div>
             <!-- 图片轮播（图文笔记） -->
-            <div v-else-if="(displayImageList && displayImageList.length > 0) || (showPaymentOverlay && imageList.length > 0)" class="mobile-image-container" :class="{ 'has-payment-overlay': showPaymentOverlay }">
+            <div v-else-if="(displayImageListWithUnlock && displayImageListWithUnlock.length > 0) || (showPaymentOverlay && imageList.length > 0)" class="mobile-image-container" :class="{ 'has-payment-overlay': showPaymentOverlay }">
               <!-- 当有可显示的图片时 -->
-              <div v-if="displayImageList.length > 0" class="mobile-image-slider" :style="{ transform: `translateX(-${currentImageIndex * 100}%)` }"
-                @touchstart="!showPaymentOverlay && handleTouchStart($event)" @touchmove="!showPaymentOverlay && handleTouchMove($event)" @touchend="!showPaymentOverlay && handleTouchEnd($event)">
-                <img v-for="(image, index) in displayImageList" :key="index" 
-                  :src="showContent ? image : (index === 0 ? props.item.image : '')" 
-                  :alt="`图片 ${index + 1}`"
-                  class="mobile-slider-image" :class="{ 'blurred': showPaymentOverlay }" @click="!showPaymentOverlay && openImageViewer()" @load="handleImageLoad($event, index)" />
+              <div v-if="displayImageListWithUnlock.length > 0" class="mobile-image-slider" :style="{ transform: `translateX(-${currentImageIndex * 100}%)` }"
+                @touchstart="handleTouchStart($event)" @touchmove="handleTouchMove($event)" @touchend="handleTouchEnd($event)">
+                <template v-for="(image, index) in displayImageListWithUnlock" :key="index">
+                  <!-- 解锁占位图 -->
+                  <div v-if="isUnlockPlaceholder(image)" class="unlock-slide mobile-unlock-slide">
+                    <div class="unlock-slide-content">
+                      <div class="unlock-icon">🔒</div>
+                      <div class="unlock-text">还有 {{ hiddenImageCount }} 张付费图片</div>
+                      <div class="unlock-price">
+                        <span class="price-icon">🍒</span>
+                        <span class="price-value">{{ paymentSettings?.price || 0 }}</span>
+                        <span class="price-unit">石榴点</span>
+                      </div>
+                      <button class="unlock-btn" @click="handleUnlockContent" :disabled="isUnlocking">
+                        {{ isUnlocking ? '解锁中...' : '立即解锁查看全部' }}
+                      </button>
+                    </div>
+                  </div>
+                  <!-- 正常图片 -->
+                  <img v-else
+                    :src="showContent ? image : (index === 0 ? props.item.image : '')" 
+                    :alt="`图片 ${index + 1}`"
+                    class="mobile-slider-image" @click="openImageViewer()" @load="handleImageLoad($event, index)" />
+                </template>
               </div>
               <!-- 当没有可显示的图片（全部付费）时，显示第一张图片作为背景模糊 -->
               <div v-else-if="showPaymentOverlay && imageList.length > 0" class="mobile-image-slider">
@@ -163,22 +199,22 @@
                 </button>
               </div>
 
-              <div v-if="hasMultipleDisplayImages && !showPaymentOverlay" class="mobile-image-controls">
+              <div v-if="displayImageListWithUnlock.length > 1" class="mobile-image-controls">
                 <button class="mobile-nav-btn mobile-prev-btn" @click="prevImage" :disabled="currentImageIndex === 0">
                   <SvgIcon name="left" width="20" height="20" />
                 </button>
                 <button class="mobile-nav-btn mobile-next-btn" @click="nextImage"
-                  :disabled="currentImageIndex === displayImageList.length - 1">
+                  :disabled="currentImageIndex === displayImageListWithUnlock.length - 1">
                   <SvgIcon name="right" width="20" height="20" />
                 </button>
                 <div class="mobile-image-counter">
-                  {{ currentImageIndex + 1 }}/{{ displayImageList.length }}
+                  {{ currentImageIndex + 1 }}/{{ displayImageListWithUnlock.length }}
                 </div>
               </div>
             </div>
-            <div v-if="displayImageList.length > 1 && !showPaymentOverlay" class="mobile-dots-indicator">
+            <div v-if="displayImageListWithUnlock.length > 1" class="mobile-dots-indicator">
               <div class="mobile-dots">
-                <span v-for="(image, index) in displayImageList" :key="index" class="mobile-dot"
+                <span v-for="(image, index) in displayImageListWithUnlock" :key="index" class="mobile-dot"
                   :class="{ active: index === currentImageIndex }" @click="goToImage(index)"></span>
               </div>
             </div>
@@ -744,8 +780,24 @@ const displayImageList = computed(() => {
   return imageList.value
 })
 
-// 是否有多张可显示的图片
-const hasMultipleDisplayImages = computed(() => displayImageList.value.length > 1)
+// 显示图片列表（包含解锁占位图）
+const displayImageListWithUnlock = computed(() => {
+  const images = [...displayImageList.value]
+  // 如果有隐藏的付费图片，在末尾添加一个解锁占位图标记
+  if (hasHiddenPaidImages.value && images.length > 0) {
+    images.push('__UNLOCK_PLACEHOLDER__')
+    console.log('🔧 [DetailCard] 添加解锁占位图，总共', images.length, '张')
+  }
+  return images
+})
+
+// 检查是否为解锁占位图
+const isUnlockPlaceholder = (image) => {
+  return image === '__UNLOCK_PLACEHOLDER__'
+}
+
+// 是否有多张可显示的图片（包含解锁占位图）
+const hasMultipleDisplayImages = computed(() => displayImageListWithUnlock.value.length > 1)
 
 // 移动端检测
 const isMobile = computed(() => windowWidth.value <= 768)
@@ -4914,5 +4966,85 @@ function handleAvatarError(event) {
     padding: 8px 14px;
     font-size: 15px;
   }
+}
+
+/* 解锁占位图样式 */
+.unlock-slide {
+  flex-shrink: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  position: relative;
+}
+
+.unlock-slide-content {
+  text-align: center;
+  color: white;
+  padding: 20px;
+}
+
+.unlock-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.unlock-text {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.unlock-price {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 16px;
+  margin-bottom: 20px;
+}
+
+.unlock-price .price-icon {
+  font-size: 20px;
+}
+
+.unlock-price .price-value {
+  font-weight: 700;
+  font-size: 24px;
+}
+
+.unlock-price .price-unit {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.unlock-btn {
+  background: white;
+  color: #764ba2;
+  border: none;
+  padding: 12px 32px;
+  border-radius: 25px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.unlock-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.unlock-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.mobile-unlock-slide {
+  min-height: 300px;
 }
 </style>
