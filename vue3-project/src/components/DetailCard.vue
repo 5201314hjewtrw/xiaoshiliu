@@ -613,38 +613,61 @@ const rawImages = computed(() => {
   let images = []
   if (props.item.originalData?.images && Array.isArray(props.item.originalData.images)) {
     images = props.item.originalData.images
+    console.log('🔧 [DetailCard] rawImages 来源: originalData.images')
   } else if (props.item.images && Array.isArray(props.item.images)) {
     images = props.item.images
+    console.log('🔧 [DetailCard] rawImages 来源: item.images')
   }
   
+  console.log('🔧 [DetailCard] rawImages 原始数据:', images)
+  
   // 对图片进行排序：免费图片优先显示
-  return [...images].sort((a, b) => {
+  const sorted = [...images].sort((a, b) => {
     const aIsFree = typeof a === 'object' && a.isFreePreview === true
     const bIsFree = typeof b === 'object' && b.isFreePreview === true
     if (aIsFree && !bIsFree) return -1
     if (!aIsFree && bIsFree) return 1
     return 0
   })
+  
+  console.log('🔧 [DetailCard] rawImages 排序后:', sorted)
+  return sorted
 })
 
 // 可显示的图片列表（根据付费设置过滤）
 const visibleImageList = computed(() => {
   const allImages = imageList.value
+  console.log('🔧 [DetailCard] visibleImageList 计算:')
+  console.log('🔧 [DetailCard] showPaymentOverlay:', showPaymentOverlay.value)
+  console.log('🔧 [DetailCard] allImages.length:', allImages.length)
+  console.log('🔧 [DetailCard] rawImages.value:', rawImages.value)
+  
   if (!showPaymentOverlay.value) {
+    console.log('🔧 [DetailCard] 不需要遮挡，返回所有图片')
     return allImages
   }
   
   // 检查图片是否有 isFreePreview 属性（新格式）
   const imagesWithFreePreviewProp = rawImages.value.filter(img => typeof img === 'object' && img.isFreePreview !== undefined)
+  console.log('🔧 [DetailCard] imagesWithFreePreviewProp.length:', imagesWithFreePreviewProp.length)
+  
   if (imagesWithFreePreviewProp && imagesWithFreePreviewProp.length > 0) {
     // 使用 isFreePreview 属性过滤，只显示标记为免费的图片
-    return allImages.filter((url, index) => {
-      const imgData = rawImages.value[index]
-      return imgData && typeof imgData === 'object' && imgData.isFreePreview
+    // rawImages已经排序过，所以直接用索引匹配即可
+    const freeImages = []
+    rawImages.value.forEach((imgData, index) => {
+      if (imgData && typeof imgData === 'object' && imgData.isFreePreview === true) {
+        if (allImages[index]) {
+          freeImages.push(allImages[index])
+        }
+      }
     })
+    console.log('🔧 [DetailCard] 过滤后免费图片数量:', freeImages.length)
+    return freeImages
   }
   
   // 旧格式：使用 freePreviewCount
+  console.log('🔧 [DetailCard] 使用旧格式 freePreviewCount:', freePreviewCount.value)
   return allImages.slice(0, freePreviewCount.value)
 })
 
@@ -664,9 +687,16 @@ const hiddenImageCount = computed(() => {
 
 // 实际显示的图片列表（付费内容时只显示免费预览的图片）
 const displayImageList = computed(() => {
+  console.log('🔧 [DetailCard] displayImageList 计算:')
+  console.log('🔧 [DetailCard] showPaymentOverlay:', showPaymentOverlay.value)
+  console.log('🔧 [DetailCard] visibleImageList:', visibleImageList.value)
+  console.log('🔧 [DetailCard] imageList:', imageList.value)
+  
   if (showPaymentOverlay.value) {
+    console.log('🔧 [DetailCard] 返回 visibleImageList (需要付费遮挡)')
     return visibleImageList.value
   }
+  console.log('🔧 [DetailCard] 返回 imageList (不需要付费遮挡)')
   return imageList.value
 })
 
