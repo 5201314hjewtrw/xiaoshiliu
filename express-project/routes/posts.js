@@ -623,6 +623,14 @@ router.get('/:id', optionalAuth, async (req, res) => {
     if (post.type === 1) {
       // 图文类型：获取图片（包含is_free_preview属性）
       const [images] = await pool.execute('SELECT image_url, is_free_preview FROM post_images WHERE post_id = ?', [postId]);
+      // 调试：打印原始图片数据
+      console.log(`🔧 [posts.js] 帖子${postId}原始图片数据:`, images.map(img => ({
+        url: img.image_url,
+        is_free_preview_raw: img.is_free_preview,
+        is_free_preview_type: typeof img.is_free_preview,
+        is_free_preview_number: Number(img.is_free_preview),
+        isFreePreview_result: Number(img.is_free_preview) === 1
+      })));
       // 返回包含isFreePreview属性的对象
       post.images = images.map(img => ({
         url: img.image_url,
