@@ -673,6 +673,16 @@ const hasHiddenPaidImages = computed(() => {
     return false
   }
   
+  // 优先使用后端返回的 hiddenPaidImagesCount
+  const backendHiddenCount = props.item.hiddenPaidImagesCount || props.item.originalData?.hiddenPaidImagesCount || 0
+  console.log('🔧 [DetailCard] 后端返回的隐藏付费图片数量:', backendHiddenCount)
+  
+  if (backendHiddenCount > 0) {
+    console.log('🔧 [DetailCard] hasHiddenPaidImages = true (后端返回有隐藏付费图片)')
+    return true
+  }
+  
+  // 兼容旧逻辑：检查rawImages中是否有付费图片
   const hasIsFreePreviewProp = rawImages.value.some(img => typeof img === 'object' && img.isFreePreview !== undefined)
   console.log('🔧 [DetailCard] hasIsFreePreviewProp:', hasIsFreePreviewProp)
   
@@ -773,6 +783,13 @@ const visibleImageList = computed(() => {
 // 被隐藏的图片数量
 const hiddenImageCount = computed(() => {
   if (!shouldFilterImages.value) return 0
+  
+  // 优先使用后端返回的 hiddenPaidImagesCount
+  const backendHiddenCount = props.item.hiddenPaidImagesCount || props.item.originalData?.hiddenPaidImagesCount || 0
+  if (backendHiddenCount > 0) {
+    console.log('🔧 [DetailCard] hiddenImageCount 使用后端值:', backendHiddenCount)
+    return backendHiddenCount
+  }
   
   // 检查图片是否有 isFreePreview 属性
   const imagesWithFreePreviewProp = rawImages.value.filter(img => typeof img === 'object' && img.isFreePreview !== undefined)

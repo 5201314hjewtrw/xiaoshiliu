@@ -68,6 +68,9 @@ function transformPostData(backendPost) {
     author_auto_id: backendPost.author_auto_id,
     author_account: backendPost.author_account,
     user_id: backendPost.user_id,
+    // 付费图片相关信息（后端过滤后返回的隐藏付费图片数量）
+    hiddenPaidImagesCount: backendPost.hiddenPaidImagesCount || 0,
+    totalImagesCount: backendPost.totalImagesCount || (backendPost.images ? backendPost.images.length : 0),
     // 保留原始数据以备需要
     originalData: {
       content: backendPost.content,
@@ -75,7 +78,9 @@ function transformPostData(backendPost) {
       tags: backendPost.tags || [],
       createdAt: backendPost.created_at,
       userId: backendPost.user_id,
-      paymentSettings: backendPost.paymentSettings || null
+      paymentSettings: backendPost.paymentSettings || null,
+      hiddenPaidImagesCount: backendPost.hiddenPaidImagesCount || 0,
+      totalImagesCount: backendPost.totalImagesCount || (backendPost.images ? backendPost.images.length : 0)
     }
   }
 

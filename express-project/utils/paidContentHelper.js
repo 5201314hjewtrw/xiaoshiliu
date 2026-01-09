@@ -156,11 +156,25 @@ function protectPostDetail(post, options = {}) {
     const hasIsFreePreviewProp = post.images.some(img => typeof img === 'object' && img.isFreePreview !== undefined);
     
     if (hasIsFreePreviewProp) {
+      // 计算付费图片数量（需要在过滤前计算）
+      const paidImagesCount = post.images.filter(img => typeof img === 'object' && img.isFreePreview === false).length;
+      const totalImagesCount = post.images.length;
+      
+      // 保存总图片数和付费图片数，供前端显示解锁提示
+      post.totalImagesCount = totalImagesCount;
+      post.hiddenPaidImagesCount = paidImagesCount;
+      
+      console.log(`🔧 [paidContentHelper] protectPostDetail - 总图片: ${totalImagesCount}, 付费图片: ${paidImagesCount}`);
+      
       // 使用isFreePreview属性过滤，只保留标记为免费的图片
       post.images = post.images.filter(img => typeof img === 'object' && img.isFreePreview === true);
     } else {
       // 旧格式：限制图片数量为免费预览数量
       const freePreviewCount = options.freePreviewCount || 0;
+      const totalImagesCount = post.images.length;
+      post.totalImagesCount = totalImagesCount;
+      post.hiddenPaidImagesCount = Math.max(0, totalImagesCount - freePreviewCount);
+      
       if (post.images.length > freePreviewCount) {
         post.images = post.images.slice(0, freePreviewCount);
       }
