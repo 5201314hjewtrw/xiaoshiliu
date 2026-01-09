@@ -237,6 +237,11 @@ const props = defineProps({
   isPaidContent: {
     type: Boolean,
     default: false
+  },
+  // 是否为预览视频（播放完毕后显示解锁覆盖层）
+  isPreviewVideo: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -991,7 +996,13 @@ const setupVideoListeners = () => {
 
   videoElement.value.addEventListener('ended', () => {
     isPlaying.value = false
-    emit('ended')
+    // 如果是预览视频，播放完毕后显示解锁覆盖层
+    if (props.isPreviewVideo && props.isPaidContent) {
+      showPreviewEndedOverlay.value = true
+      emit('preview-ended')
+    } else {
+      emit('ended')
+    }
   })
 
   // 上次更新码率的时间戳

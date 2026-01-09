@@ -547,6 +547,101 @@ async function deleteInvalidVideo(videoPath) {
   }
 }
 
+/**
+ * 生成视频预览片段
+ * 从原视频中裁剪指定时长的预览视频
+ * @param {string} inputPath - 输入视频路径或URL
+ * @param {number} duration - 预览时长（秒）
+ * @param {number} userId - 用户ID
+ * @returns {Promise<{success: boolean, previewUrl?: string, message?: string}>}
+ */
+async function generatePreviewVideo(inputPath, duration, userId) {
+  try {
+    if (!duration || duration <= 0) {
+      return { success: false, message: '预览时长必须大于0' };
+    }
+
+    console.log(`🎬 开始生成预览视频: ${inputPath}, 时长: ${duration}秒`);
+
+    // 分析原视频获取信息
+    const videoInfo = await analyzeVideo(inputPath);
+    
+    // 如果原视频时长小于预览时长，不需要生成预览
+    if (videoInfo.duration <= duration) {
+      console.log(`⚠️ 原视频时长(${videoInfo.duration}秒)小于预览时长(${duration}秒)，无需生成预览`);
+      return { success: false, message: '原视频时长小于预览时长' };
+    }
+
+    // 生成输出文件路径
+    const timestamp = Date.now();
+    const previewDir = path.join(process.cwd(), config.upload.video.local.uploadDir, 'previews');
+    
+    // 确保预览目录存在
+    if (!fs.existsSync(previewDir)) {
+      fs.mkdirSync(previewDir, { recursive: true });
+    }
+
+    const previewFilename = `preview_${userId}_${timestamp}.mp4`;
+    const outputPath = path.join(previewDir, previewFilename);
+
+    return new Promise((resolve, reject) => {
+      const command = ffmpeg(inputPath)
+        .setStartTime(0)
+        .setDuration(duration)
+        .videoCodec('libx264')
+        .audioCodec('aac')
+        .outputOptions([
+          '-preset fast',
+          '-crf 23',
+          '-movflags +faststart'
+        ])
+        .output(outputPath);
+
+      command.on('start', (commandLine) => {
+        console.log('🎬 FFmpeg 预览视频命令:', commandLine);
+      });
+
+      command.on('progress', (progress) => {
+        if (progress.percent) {
+          console.log(`⏳ 预览视频生成进度: ${Math.floor(progress.percent)}%`);
+        }
+      });
+
+      command.on('error', (err) => {
+        console.error('❌ 预览视频生成失败:', err.message);
+        resolve({
+          success: false,
+          message: `预览视频生成失败: ${err.message}`
+        });
+      });
+
+      command.on('end', () => {
+        console.log('✅ 预览视频生成完成:', outputPath);
+        
+        // 生成访问URL
+        const baseUrl = config.upload.video.local.baseUrl;
+        const videoDir = config.upload.video.local.uploadDir;
+        const previewUrl = `${baseUrl}/${videoDir}/previews/${previewFilename}`;
+
+        resolve({
+          success: true,
+          previewUrl: previewUrl,
+          previewPath: outputPath
+        });
+      });
+
+      command.run();
+    });
+
+  } catch (error) {
+    console.error('❌ 生成预览视频异常:', error);
+    return {
+      success: false,
+      message: error.message || '生成预览视频异常'
+    };
+  }
+}
+
 module.exports = {
   analyzeVideo,
   selectResolutions,
@@ -555,5 +650,6 @@ module.exports = {
   convertToDash,
   checkFFmpegAvailable,
   validateVideoMedia,
-  deleteInvalidVideo
+  deleteInvalidVideo,
+  generatePreviewVideo
 };

@@ -7,6 +7,7 @@ const NotificationHelper = require('../utils/notificationHelper');
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser');
 const { batchCleanupFiles } = require('../utils/fileCleanup');
 const { sanitizeContent } = require('../utils/contentSecurity');
+const { generatePreviewVideo } = require('../utils/videoTranscoder');
 const { 
   isPaidContent, 
   shouldProtectContent, 
@@ -63,7 +64,7 @@ router.get('/', optionalAuth, async (req, res) => {
         // 根据笔记类型获取图片或视频封面
         if (post.type === 2) {
           // 视频笔记：获取视频封面
-          const [videos] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [post.id]);
+          const [videos] = await pool.execute('SELECT video_url, cover_url, preview_video_url FROM post_videos WHERE post_id = ?', [post.id]);
           post.images = videos.length > 0 && videos[0].cover_url ? [videos[0].cover_url] : [];
           post.video_url = videos.length > 0 ? videos[0].video_url : null;
           // 为瀑布流设置image字段
@@ -231,7 +232,7 @@ router.get('/', optionalAuth, async (req, res) => {
       
       // 批量获取所有视频
       const [allVideos] = await pool.execute(
-        `SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, video_url, cover_url, preview_video_url FROM post_videos WHERE post_id IN (${placeholders})`,
         postIds
       );
       const videosByPostId = {};
@@ -488,7 +489,7 @@ router.get('/following', authenticateToken, async (req, res) => {
 
       // 批量获取所有视频
       const [allVideos] = await pool.execute(
-        `SELECT post_id, video_url, cover_url FROM post_videos WHERE post_id IN (${placeholders})`,
+        `SELECT post_id, video_url, cover_url, preview_video_url FROM post_videos WHERE post_id IN (${placeholders})`,
         postIds
       );
       const videosByPostId = {};
@@ -638,12 +639,13 @@ router.get('/:id', optionalAuth, async (req, res) => {
       }));
     } else if (post.type === 2) {
       // 视频类型：获取视频
-      const [videos] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [postId]);
+      const [videos] = await pool.execute('SELECT video_url, cover_url, preview_video_url FROM post_videos WHERE post_id = ?', [postId]);
       post.videos = videos;
       // 将第一个视频的URL和封面提取到主对象中，方便前端使用
       if (videos.length > 0) {
         post.video_url = videos[0].video_url;
         post.cover_url = videos[0].cover_url;
+        post.preview_video_url = videos[0].preview_video_url;
       }
     }
 
@@ -854,6 +856,27 @@ router.post('/', authenticateToken, async (req, res) => {
         [postId.toString(), video.url, coverUrl]
       );
       console.log('✅ 视频记录插入成功');
+
+      // 如果有付费设置且设置了预览时长，生成预览视频
+      if (paymentSettings && paymentSettings.enabled && paymentSettings.previewDuration > 0 && video.url) {
+        console.log('🎬 开始生成预览视频，时长:', paymentSettings.previewDuration, '秒');
+        try {
+          const previewResult = await generatePreviewVideo(video.url, paymentSettings.previewDuration, userId);
+          if (previewResult.success && previewResult.previewUrl) {
+            // 更新视频记录，添加预览视频URL
+            await pool.execute(
+              'UPDATE post_videos SET preview_video_url = ? WHERE post_id = ?',
+              [previewResult.previewUrl, postId.toString()]
+            );
+            console.log('✅ 预览视频生成成功:', previewResult.previewUrl);
+          } else {
+            console.log('⚠️ 预览视频生成失败:', previewResult.message);
+          }
+        } catch (previewError) {
+          console.error('❌ 生成预览视频异常:', previewError.message);
+          // 预览视频生成失败不影响发布
+        }
+      }
     }
 
     // 处理附件
@@ -1297,7 +1320,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       
       if (hasVideoUpdate) {
         // 获取原有视频记录
-        const [oldVideoRows] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [postId.toString()]);
+        const [oldVideoRows] = await pool.execute('SELECT video_url, cover_url, preview_video_url FROM post_videos WHERE post_id = ?', [postId.toString()]);
         const oldVideoData = oldVideoRows.length > 0 ? oldVideoRows[0] : null;
         
         let newVideoUrl = null;
@@ -1585,7 +1608,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 
     // 获取笔记关联的视频文件，用于清理
-    const [videoRows] = await pool.execute('SELECT video_url, cover_url FROM post_videos WHERE post_id = ?', [postId.toString()]);
+    const [videoRows] = await pool.execute('SELECT video_url, cover_url, preview_video_url FROM post_videos WHERE post_id = ?', [postId.toString()]);
 
     // 删除相关数据（由于外键约束，需要按顺序删除）
     await pool.execute('DELETE FROM post_images WHERE post_id = ?', [postId.toString()]);

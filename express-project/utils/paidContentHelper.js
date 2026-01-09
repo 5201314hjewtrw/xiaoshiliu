@@ -94,8 +94,10 @@ function protectPostListItem(post, options) {
   if (post.type === 2) {
     // 视频笔记
     post.images = videoData && videoData.cover_url ? [videoData.cover_url] : [];
-    // 保护付费视频：不返回video_url
+    // 保护付费视频：不返回video_url，但返回preview_video_url
     post.video_url = protect ? null : (videoData ? videoData.video_url : null);
+    // 预览视频URL：付费内容时返回预览视频（如果有）
+    post.preview_video_url = protect && videoData && videoData.preview_video_url ? videoData.preview_video_url : null;
     post.image = videoData && videoData.cover_url ? videoData.cover_url : null;
   } else {
     // 图文笔记

@@ -24,9 +24,9 @@
           @mouseleave="showImageControls = false">
           <!-- 视频播放器（桌面端） -->
           <div v-if="props.item.type === 2 && !isMobile" class="video-container">
-            <!-- 有视频URL时，根据付费状态处理 -->
-            <template v-if="props.item.video_url">
-              <!-- 付费视频且未购买：显示预览视频 -->
+            <!-- 有视频URL或预览视频URL时处理 -->
+            <template v-if="props.item.video_url || props.item.preview_video_url">
+              <!-- 付费视频且未购买：播放预览视频 -->
               <ShakaVideoPlayer
                 v-if="isPaidVideoWithPreview"
                 ref="videoPlayer"
@@ -36,8 +36,9 @@
                 :show-controls="true"
                 :show-play-button="true"
                 :muted="false"
-                :preview-duration="paymentSettings?.previewDuration || 0"
-                :is-paid-content="isPaidContent && !hasPurchased"
+                :preview-duration="0"
+                :is-paid-content="true"
+                :is-preview-video="!!props.item.preview_video_url"
                 class="video-player"
                 @loaded="handleVideoLoad"
                 @preview-ended="handlePreviewEnded"
@@ -57,7 +58,7 @@
                 @loaded="handleVideoLoad"
               />
             </template>
-            <!-- 付费视频且无video_url：显示解锁遮罩 -->
+            <!-- 付费视频且无video_url也无preview_video_url：显示解锁遮罩 -->
             <div v-else-if="isPaidContent && !hasPurchased" class="video-payment-overlay">
               <div class="video-cover-blur" v-if="props.item.cover_url || (props.item.images && props.item.images[0])">
                 <img :src="props.item.cover_url || (props.item.images && props.item.images[0])" alt="视频封面" class="blur-cover-image" />
@@ -173,9 +174,9 @@
           <div class="scrollable-content" ref="scrollableContent">
             <!-- 视频播放器（移动端） -->
             <div v-if="props.item.type === 2 && isMobile" class="mobile-video-container">
-              <!-- 有视频URL时，根据付费状态处理 -->
-              <template v-if="props.item.video_url">
-                <!-- 付费视频且未购买：显示预览视频 -->
+              <!-- 有视频URL或预览视频URL时处理 -->
+              <template v-if="props.item.video_url || props.item.preview_video_url">
+                <!-- 付费视频且未购买：播放预览视频 -->
                 <ShakaVideoPlayer
                   v-if="isPaidVideoWithPreview"
                   ref="mobileVideoPlayer"
@@ -185,8 +186,9 @@
                   :show-controls="true"
                   :show-play-button="true"
                   :muted="false"
-                  :preview-duration="paymentSettings?.previewDuration || 0"
-                  :is-paid-content="isPaidContent && !hasPurchased"
+                  :preview-duration="0"
+                  :is-paid-content="true"
+                  :is-preview-video="!!props.item.preview_video_url"
                   class="mobile-video-player"
                   @loaded="handleVideoLoad"
                   @preview-ended="handlePreviewEnded"
@@ -206,7 +208,7 @@
                   @loaded="handleVideoLoad"
                 />
               </template>
-              <!-- 付费视频且无video_url：显示解锁遮罩 -->
+              <!-- 付费视频且无video_url也无preview_video_url：显示解锁遮罩 -->
               <div v-else-if="isPaidContent && !hasPurchased" class="video-payment-overlay">
                 <div class="video-cover-blur" v-if="props.item.cover_url || (props.item.images && props.item.images[0])">
                   <img :src="props.item.cover_url || (props.item.images && props.item.images[0])" alt="视频封面" class="blur-cover-image" />
@@ -721,15 +723,16 @@ const hasPurchased = computed(() => {
   return props.item.hasPurchased || false
 })
 
-// 是否为付费视频且有预览时长设置
+// 是否为付费视频且有预览视频或预览时长设置
 const isPaidVideoWithPreview = computed(() => {
   // 是付费内容、未购买、且是视频类型
   if (!isPaidContent.value || hasPurchased.value || props.item.type !== 2) {
     return false
   }
-  // 检查是否有预览时长设置
+  // 检查是否有预览视频URL或预览时长设置
+  const hasPreviewVideo = !!props.item.preview_video_url
   const previewDuration = paymentSettings.value?.previewDuration || 0
-  return previewDuration > 0
+  return hasPreviewVideo || previewDuration > 0
 })
 
 // 是否需要显示付费遮挡
