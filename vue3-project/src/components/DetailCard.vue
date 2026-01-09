@@ -747,14 +747,21 @@ const visibleImageList = computed(() => {
     // 使用 isFreePreview 属性过滤，只显示标记为免费的图片
     // rawImages已经排序过，所以直接用索引匹配即可
     const freeImages = []
+    const paidImages = []
     rawImages.value.forEach((imgData, index) => {
-      if (imgData && typeof imgData === 'object' && imgData.isFreePreview === true) {
-        if (allImages[index]) {
-          freeImages.push(allImages[index])
+      if (imgData && typeof imgData === 'object') {
+        console.log(`🔧 [DetailCard] 图片${index + 1} isFreePreview:`, imgData.isFreePreview)
+        if (imgData.isFreePreview === true) {
+          if (allImages[index]) {
+            freeImages.push(allImages[index])
+          }
+        } else if (imgData.isFreePreview === false) {
+          paidImages.push(allImages[index])
         }
       }
     })
     console.log('🔧 [DetailCard] 过滤后免费图片数量:', freeImages.length)
+    console.log('🔧 [DetailCard] 付费图片数量:', paidImages.length)
     return freeImages
   }
   
