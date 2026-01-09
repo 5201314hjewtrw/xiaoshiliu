@@ -74,7 +74,7 @@ router.get('/', optionalAuth, async (req, res) => {
           // 返回包含isFreePreview属性的对象
           post.images = images.map(img => ({
             url: img.image_url,
-            isFreePreview: img.is_free_preview === 1
+            isFreePreview: Number(img.is_free_preview) === 1
           }));
           // 为瀑布流设置image字段（取第一张图片）
           post.image = images.length > 0 ? images[0].image_url : null;
@@ -225,7 +225,7 @@ router.get('/', optionalAuth, async (req, res) => {
         // 返回包含isFreePreview属性的对象
         imagesByPostId[img.post_id].push({
           url: img.image_url,
-          isFreePreview: img.is_free_preview === 1
+          isFreePreview: Number(img.is_free_preview) === 1
         });
       });
       
@@ -482,7 +482,7 @@ router.get('/following', authenticateToken, async (req, res) => {
         // 返回包含isFreePreview属性的对象
         imagesByPostId[img.post_id].push({
           url: img.image_url,
-          isFreePreview: img.is_free_preview === 1
+          isFreePreview: Number(img.is_free_preview) === 1
         });
       });
 
@@ -626,7 +626,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
       // 返回包含isFreePreview属性的对象
       post.images = images.map(img => ({
         url: img.image_url,
-        isFreePreview: img.is_free_preview === 1
+        isFreePreview: Number(img.is_free_preview) === 1
       }));
     } else if (post.type === 2) {
       // 视频类型：获取视频
@@ -992,7 +992,7 @@ router.get('/search', optionalAuth, async (req, res) => {
         // 返回包含isFreePreview属性的对象
         imagesByPostId[img.post_id].push({
           url: img.image_url,
-          isFreePreview: img.is_free_preview === 1
+          isFreePreview: Number(img.is_free_preview) === 1
         });
       });
       
