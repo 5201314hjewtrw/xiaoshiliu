@@ -206,16 +206,22 @@ router.post('/', authenticateToken, async (req, res) => {
           }
           detailedReason = parts.join(' | ');
           
-          // 检查是否启用AI自动审核
-          if (isAiAutoReviewEnabled() && auditResult.passed !== undefined) {
+          // 根据AI审核结果设置状态
+          if (auditResult.passed !== undefined) {
             if (auditResult.passed === true) {
-              // AI判断通过，自动审核通过
-              auditStatus = 1;
-              isPublic = 1;
-              auditRecordStatus = 1; // 已通过
-              detailedReason = `[AI自动审核通过] ${detailedReason}`;
+              // AI判断通过
+              if (isAiAutoReviewEnabled()) {
+                // AI自动审核开启，自动通过
+                auditStatus = 1;
+                isPublic = 1;
+                auditRecordStatus = 1; // 已通过
+                detailedReason = `[AI自动审核通过] ${detailedReason}`;
+              } else {
+                // AI自动审核关闭，仍需人工确认
+                auditRecordStatus = 0; // 待审核
+              }
             } else {
-              // AI判断不通过，自动审核拒绝，标记需要删除评论
+              // AI判断不通过，直接拒绝（无论AI自动审核开关状态）
               auditStatus = 2;
               isPublic = 0;
               auditRecordStatus = 2; // 已拒绝
