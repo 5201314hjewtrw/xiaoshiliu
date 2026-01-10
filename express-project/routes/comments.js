@@ -164,40 +164,44 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // 进行内容审核
-    let auditStatus = 1; // 默认审核通过
-    let isPublic = 1; // 默认公开可见
+    // 当启用审核时，所有评论默认待审核状态，仅自己可见
+    let auditStatus = isAuditEnabled() ? 0 : 1; // 启用审核时默认待审核，否则直接通过
+    let isPublic = isAuditEnabled() ? 0 : 1; // 启用审核时仅自己可见，否则公开
     let auditResult = null;
 
     if (isAuditEnabled()) {
       try {
-        // 调用审核API
+        // 调用审核API获取审核建议
         auditResult = await auditComment(sanitizedContent, userId);
         
-        // 确保审核结果存在
-        if (auditResult && auditResult.passed === false) {
-          // 审核不通过，待人工审核
-          auditStatus = 0;
-          isPublic = 0; // 仅自己可见
-          
-          // 记录审核事件到audit表
-          await pool.execute(
-            `INSERT INTO audit (user_id, type, target_id, content, audit_result, risk_level, categories, reason, status) 
-             VALUES (?, 3, NULL, ?, ?, ?, ?, ?, 0)`,
-            [
-              userId.toString(),
-              sanitizedContent,
-              JSON.stringify(auditResult),
-              auditResult.risk_level || 'medium',
-              JSON.stringify(auditResult.categories || []),
-              auditResult.reason || ''
-            ]
-          );
-        }
-        // 如果审核通过或审核结果为null，保持默认值
+        // 无论API返回什么结果，都记录到audit表，由管理员人工审核决定
+        await pool.execute(
+          `INSERT INTO audit (user_id, type, target_id, content, audit_result, risk_level, categories, reason, status) 
+           VALUES (?, 3, NULL, ?, ?, ?, ?, ?, 0)`,
+          [
+            userId.toString(),
+            sanitizedContent,
+            JSON.stringify(auditResult),
+            auditResult?.risk_level || 'low',
+            JSON.stringify(auditResult?.categories || []),
+            auditResult?.reason || ''
+          ]
+        );
       } catch (auditError) {
         console.error('评论审核异常:', auditError);
-        // 审核异常时默认通过，不阻塞用户发表评论
-        auditResult = null;
+        // 审核异常时仍然记录到audit表，让管理员手动审核
+        await pool.execute(
+          `INSERT INTO audit (user_id, type, target_id, content, audit_result, risk_level, categories, reason, status) 
+           VALUES (?, 3, NULL, ?, ?, ?, ?, ?, 0)`,
+          [
+            userId.toString(),
+            sanitizedContent,
+            null,
+            'unknown',
+            JSON.stringify([]),
+            '审核服务异常，需人工审核'
+          ]
+        );
       }
     }
 
@@ -217,8 +221,8 @@ router.post('/', authenticateToken, async (req, res) => {
 
     const commentId = result.insertId;
     
-    // 如果审核不通过，更新audit表中的target_id为评论ID
-    if (isAuditEnabled() && auditResult && auditResult.passed === false) {
+    // 更新audit表中的target_id为评论ID
+    if (isAuditEnabled()) {
       await pool.execute(
         'UPDATE audit SET target_id = ? WHERE user_id = ? AND type = 3 AND target_id IS NULL ORDER BY id DESC LIMIT 1',
         [commentId.toString(), userId.toString()]
