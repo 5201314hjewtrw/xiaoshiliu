@@ -383,6 +383,16 @@ const config = {
     exchangeRateIn: parseFloat(process.env.BALANCE_EXCHANGE_RATE_IN) || 1.0,
     // 兑出比例：1用户中心余额 = exchangeRateOut 本站积分
     exchangeRateOut: parseFloat(process.env.BALANCE_EXCHANGE_RATE_OUT) || 1.0
+  },
+
+  // 内容审核配置
+  contentAudit: {
+    // 是否启用内容审核
+    enabled: process.env.CONTENT_AUDIT_ENABLED === 'true', // 默认不启用
+    // Dify API地址
+    apiUrl: process.env.DIFY_API_URL || 'http://aish.yuelk.com/v1/chat-messages',
+    // Dify API密钥
+    apiKey: process.env.DIFY_API_KEY || ''
   }
 };
 

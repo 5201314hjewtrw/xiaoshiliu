@@ -1942,7 +1942,7 @@ router.put('/audit/:id/approve', adminAuth, async (req, res) => {
     const { id } = req.params
 
     // 获取审核记录信息
-    const [auditResult] = await pool.query('SELECT user_id, type FROM audit WHERE id = ?', [id])
+    const [auditResult] = await pool.query('SELECT user_id, type, target_id FROM audit WHERE id = ?', [id])
     if (auditResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.ERROR,
@@ -1950,15 +1950,22 @@ router.put('/audit/:id/approve', adminAuth, async (req, res) => {
       })
     }
 
-    const { user_id, type } = auditResult[0]
+    const { user_id, type, target_id } = auditResult[0]
 
     // 更新审核状态为通过
     await pool.query('UPDATE audit SET status = 1, audit_time = NOW() WHERE id = ?', [id])
 
-    // 根据认证类型更新用户的verified字段
-    // type: 1-官方认证, 2-个人认证
-    const verifiedValue = type === 1 ? 1 : (type === 2 ? 2 : 0)
-    await pool.query('UPDATE users SET verified = ? WHERE id = ?', [verifiedValue, user_id])
+    // 根据审核类型执行不同操作
+    if (type === 1 || type === 2) {
+      // type: 1-官方认证, 2-个人认证
+      const verifiedValue = type === 1 ? 1 : (type === 2 ? 2 : 0)
+      await pool.query('UPDATE users SET verified = ? WHERE id = ?', [verifiedValue, user_id])
+    } else if (type === 3 && target_id) {
+      // type: 3-评论审核，更新评论的审核状态和可见性
+      await pool.query('UPDATE comments SET audit_status = 1, is_public = 1 WHERE id = ?', [target_id])
+    } else if (type === 4) {
+      // type: 4-昵称审核 (如果需要的话，可以在这里处理)
+    }
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
@@ -1980,7 +1987,7 @@ router.put('/audit/:id/reject', adminAuth, async (req, res) => {
     const { id } = req.params
 
     // 获取审核记录信息
-    const [auditResult] = await pool.query('SELECT user_id FROM audit WHERE id = ?', [id])
+    const [auditResult] = await pool.query('SELECT user_id, type, target_id FROM audit WHERE id = ?', [id])
     if (auditResult.length === 0) {
       return res.status(HTTP_STATUS.NOT_FOUND).json({
         code: RESPONSE_CODES.ERROR,
@@ -1988,13 +1995,21 @@ router.put('/audit/:id/reject', adminAuth, async (req, res) => {
       })
     }
 
-    const { user_id } = auditResult[0]
+    const { user_id, type, target_id } = auditResult[0]
 
     // 更新审核状态为拒绝
     await pool.query('UPDATE audit SET status = 2, audit_time = NOW() WHERE id = ?', [id])
 
-    // 拒绝认证申请时，将用户的verified字段设置为0（未认证）
-    await pool.query('UPDATE users SET verified = 0 WHERE id = ?', [user_id])
+    // 根据审核类型执行不同操作
+    if (type === 1 || type === 2) {
+      // 拒绝认证申请时，将用户的verified字段设置为0（未认证）
+      await pool.query('UPDATE users SET verified = 0 WHERE id = ?', [user_id])
+    } else if (type === 3 && target_id) {
+      // type: 3-评论审核，更新评论的审核状态（保持不公开）
+      await pool.query('UPDATE comments SET audit_status = 2, is_public = 0 WHERE id = ?', [target_id])
+    } else if (type === 4) {
+      // type: 4-昵称审核 (如果需要的话，可以在这里处理)
+    }
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,

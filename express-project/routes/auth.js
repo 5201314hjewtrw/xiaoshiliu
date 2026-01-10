@@ -7,6 +7,7 @@ const { generateAccessToken, generateRefreshToken, verifyToken } = require('../u
 const { authenticateToken } = require('../middleware/auth');
 const { getIPLocation, getRealIP } = require('../utils/ipLocation');
 const { sendEmailCode } = require('../utils/email');
+const { auditNickname, isAuditEnabled } = require('../utils/contentAudit');
 const svgCaptcha = require('svg-captcha');
 const path = require('path');
 const fs = require('fs');
@@ -549,6 +550,23 @@ router.post('/register', async (req, res) => {
 
     if (password.length < 6 || password.length > 20) {
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '密码长度必须在6-20位之间' });
+    }
+
+    // 审核昵称（如果启用了内容审核）
+    let nicknameAuditResult = null;
+    if (isAuditEnabled()) {
+      nicknameAuditResult = await auditNickname(nickname, user_id);
+      
+      if (!nicknameAuditResult.passed) {
+        // 昵称审核不通过，拒绝注册
+        return res.status(HTTP_STATUS.BAD_REQUEST).json({ 
+          code: RESPONSE_CODES.VALIDATION_ERROR, 
+          message: '昵称包含敏感内容，请修改后重试',
+          data: {
+            reason: nicknameAuditResult.reason || '昵称不符合社区规范'
+          }
+        });
+      }
     }
 
     // 获取用户IP属地
