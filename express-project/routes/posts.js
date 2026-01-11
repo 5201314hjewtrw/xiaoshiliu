@@ -1152,16 +1152,32 @@ router.get('/:id/comments', optionalAuth, async (req, res) => {
     }
 
     // 获取顶级评论（parent_id为NULL）
+    // 只显示公开的评论，或者用户自己的评论（包括待审核的）
     const orderBy = sort === 'asc' ? 'ASC' : 'DESC';
-    const [rows] = await pool.execute(
-      `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
+    let query;
+    let queryParams;
+    
+    if (currentUserId) {
+      // 已登录用户：显示公开评论 + 自己的评论（包括待审核的）
+      query = `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
-       WHERE c.post_id = ? AND c.parent_id IS NULL
+       WHERE c.post_id = ? AND c.parent_id IS NULL AND (c.is_public = 1 OR c.user_id = ?)
        ORDER BY c.created_at ${orderBy}
-       LIMIT ? OFFSET ?`,
-      [postId, limit.toString(), offset.toString()]
-    );
+       LIMIT ? OFFSET ?`;
+      queryParams = [postId, currentUserId.toString(), limit.toString(), offset.toString()];
+    } else {
+      // 未登录用户：只显示公开评论
+      query = `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
+       FROM comments c
+       LEFT JOIN users u ON c.user_id = u.id
+       WHERE c.post_id = ? AND c.parent_id IS NULL AND c.is_public = 1
+       ORDER BY c.created_at ${orderBy}
+       LIMIT ? OFFSET ?`;
+      queryParams = [postId, limit.toString(), offset.toString()];
+    }
+    
+    const [rows] = await pool.execute(query, queryParams);
 
     // 为每个评论检查点赞状态
     for (let comment of rows) {
@@ -1175,19 +1191,31 @@ router.get('/:id/comments', optionalAuth, async (req, res) => {
         comment.liked = false;
       }
 
-      // 获取子评论数量
-      const [childCount] = await pool.execute(
-        'SELECT COUNT(*) as count FROM comments WHERE parent_id = ?',
-        [comment.id]
-      );
+      // 获取子评论数量（只统计公开的或用户自己的）
+      let childCountQuery;
+      let childCountParams;
+      if (currentUserId) {
+        childCountQuery = 'SELECT COUNT(*) as count FROM comments WHERE parent_id = ? AND (is_public = 1 OR user_id = ?)';
+        childCountParams = [comment.id, currentUserId.toString()];
+      } else {
+        childCountQuery = 'SELECT COUNT(*) as count FROM comments WHERE parent_id = ? AND is_public = 1';
+        childCountParams = [comment.id];
+      }
+      const [childCount] = await pool.execute(childCountQuery, childCountParams);
       comment.reply_count = childCount[0].count;
     }
 
-    // 获取总数（直接从posts表读取comment_count字段）
-    const [countResult] = await pool.execute(
-      'SELECT comment_count as total FROM posts WHERE id = ?',
-      [postId]
-    );
+    // 获取总数（只统计公开的或用户自己的评论）
+    let countQuery;
+    let countParams;
+    if (currentUserId) {
+      countQuery = 'SELECT COUNT(*) as total FROM comments WHERE post_id = ? AND parent_id IS NULL AND (is_public = 1 OR user_id = ?)';
+      countParams = [postId, currentUserId.toString()];
+    } else {
+      countQuery = 'SELECT COUNT(*) as total FROM comments WHERE post_id = ? AND parent_id IS NULL AND is_public = 1';
+      countParams = [postId];
+    }
+    const [countResult] = await pool.execute(countQuery, countParams);
     const total = countResult[0].total;
 
 

@@ -6,6 +6,21 @@ const { authenticateToken, optionalAuth } = require('../middleware/auth');
 const NotificationHelper = require('../utils/notificationHelper');
 const { extractMentionedUsers, hasMentions } = require('../utils/mentionParser');
 const { sanitizeContent } = require('../utils/contentSecurity');
+const { auditComment, isAuditEnabled } = require('../utils/contentAudit');
+
+// 获取AI自动审核状态（延迟加载以避免循环依赖）
+let getAiAutoReviewStatus = null;
+const isAiAutoReviewEnabled = () => {
+  if (!getAiAutoReviewStatus) {
+    try {
+      const adminRoutes = require('./admin');
+      getAiAutoReviewStatus = adminRoutes.isAiAutoReviewEnabled || (() => false);
+    } catch (e) {
+      return false;
+    }
+  }
+  return getAiAutoReviewStatus();
+};
 
 // 递归删除评论及其子评论，返回删除的评论总数
 async function deleteCommentRecursive(commentId) {
@@ -45,15 +60,31 @@ router.get('/', optionalAuth, async (req, res) => {
     }
 
     // 获取顶级评论（parent_id为NULL）
-    const [rows] = await pool.execute(
-      `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
+    // 只显示公开的评论或用户自己的评论（包括待审核的）
+    let query;
+    let queryParams;
+    
+    if (currentUserId) {
+      // 已登录用户：显示公开评论 + 自己的评论（包括待审核的）
+      query = `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
-       WHERE c.post_id = ? AND c.parent_id IS NULL
+       WHERE c.post_id = ? AND c.parent_id IS NULL AND (c.is_public = 1 OR c.user_id = ?)
        ORDER BY c.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [postId.toString(), limit.toString(), offset.toString()]
-    );
+       LIMIT ? OFFSET ?`;
+      queryParams = [postId.toString(), currentUserId.toString(), limit.toString(), offset.toString()];
+    } else {
+      // 未登录用户：只显示公开评论
+      query = `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
+       FROM comments c
+       LEFT JOIN users u ON c.user_id = u.id
+       WHERE c.post_id = ? AND c.parent_id IS NULL AND c.is_public = 1
+       ORDER BY c.created_at DESC
+       LIMIT ? OFFSET ?`;
+      queryParams = [postId.toString(), limit.toString(), offset.toString()];
+    }
+    
+    const [rows] = await pool.execute(query, queryParams);
 
     // 为每个评论检查点赞状态
     for (let comment of rows) {
@@ -67,19 +98,31 @@ router.get('/', optionalAuth, async (req, res) => {
         comment.liked = false;
       }
 
-      // 获取子评论数量
-      const [childCount] = await pool.execute(
-        'SELECT COUNT(*) as count FROM comments WHERE parent_id = ?',
-        [comment.id.toString()]
-      );
+      // 获取子评论数量（只统计公开的或用户自己的）
+      let childCountQuery;
+      let childCountParams;
+      if (currentUserId) {
+        childCountQuery = 'SELECT COUNT(*) as count FROM comments WHERE parent_id = ? AND (is_public = 1 OR user_id = ?)';
+        childCountParams = [comment.id.toString(), currentUserId.toString()];
+      } else {
+        childCountQuery = 'SELECT COUNT(*) as count FROM comments WHERE parent_id = ? AND is_public = 1';
+        childCountParams = [comment.id.toString()];
+      }
+      const [childCount] = await pool.execute(childCountQuery, childCountParams);
       comment.reply_count = childCount[0].count;
     }
 
-    // 获取总数
-    const [countResult] = await pool.execute(
-      'SELECT COUNT(*) as total FROM comments WHERE post_id = ? AND parent_id IS NULL',
-      [postId.toString()]
-    );
+    // 获取总数（只统计公开的或用户自己的）
+    let countQuery;
+    let countParams;
+    if (currentUserId) {
+      countQuery = 'SELECT COUNT(*) as total FROM comments WHERE post_id = ? AND parent_id IS NULL AND (is_public = 1 OR user_id = ?)';
+      countParams = [postId.toString(), currentUserId.toString()];
+    } else {
+      countQuery = 'SELECT COUNT(*) as total FROM comments WHERE post_id = ? AND parent_id IS NULL AND is_public = 1';
+      countParams = [postId.toString()];
+    }
+    const [countResult] = await pool.execute(countQuery, countParams);
     const total = countResult[0].total;
 
     res.json({
@@ -134,13 +177,122 @@ router.post('/', authenticateToken, async (req, res) => {
       }
     }
 
+    // 进行内容审核
+    // 当启用审核时，所有评论默认待审核状态，仅自己可见
+    let auditStatus = isAuditEnabled() ? 0 : 1; // 启用审核时默认待审核，否则直接通过
+    let isPublic = isAuditEnabled() ? 0 : 1; // 启用审核时仅自己可见，否则公开
+    let auditResult = null;
+    let auditRecordStatus = 0; // 审核记录状态：0-待审核
+    let shouldDeleteComment = false; // 是否应该删除评论（AI拒绝时）
+
+    if (isAuditEnabled()) {
+      try {
+        // 调用审核API获取审核建议
+        auditResult = await auditComment(sanitizedContent, userId);
+        
+        // 构建详细的审核原因，包含AI返回的所有信息
+        let detailedReason = '';
+        if (auditResult) {
+          const parts = [];
+          if (auditResult.reason) parts.push(`AI审核结果: ${auditResult.reason}`);
+          if (auditResult.suggestion) parts.push(`建议: ${auditResult.suggestion}`);
+          if (auditResult.passed !== undefined) parts.push(`是否通过: ${auditResult.passed ? '是' : '否'}`);
+          if (auditResult.score !== undefined) parts.push(`风险分数: ${auditResult.score}`);
+          if (auditResult.matched_keywords && auditResult.matched_keywords.length > 0) {
+            parts.push(`匹配关键词: ${auditResult.matched_keywords.join(', ')}`);
+          }
+          if (auditResult.problem_sentences && auditResult.problem_sentences.length > 0) {
+            parts.push(`问题句子: ${auditResult.problem_sentences.join('; ')}`);
+          }
+          detailedReason = parts.join(' | ');
+          
+          // 根据AI审核结果设置状态
+          // AI返回passed:true时自动通过，passed:false时自动拒绝
+          if (auditResult.passed !== undefined) {
+            if (auditResult.passed === true) {
+              // AI判断通过，自动通过
+              auditStatus = 1;
+              isPublic = 1;
+              auditRecordStatus = 1; // 已通过
+              detailedReason = `[AI自动审核通过] ${detailedReason}`;
+            } else {
+              // AI判断不通过，直接拒绝
+              auditStatus = 2;
+              isPublic = 0;
+              auditRecordStatus = 2; // 已拒绝
+              shouldDeleteComment = true; // 拒绝的评论需要删除
+              detailedReason = `[AI自动审核拒绝] ${detailedReason}`;
+            }
+          }
+        }
+        
+        // 记录到audit表
+        await pool.execute(
+          `INSERT INTO audit (user_id, type, target_id, content, audit_result, risk_level, categories, reason, status, audit_time, retry_count) 
+           VALUES (?, 3, NULL, ?, ?, ?, ?, ?, ?, ${auditRecordStatus !== 0 ? 'NOW()' : 'NULL'}, 0)`,
+          [
+            userId.toString(),
+            sanitizedContent,
+            JSON.stringify(auditResult),
+            auditResult?.risk_level || 'low',
+            JSON.stringify(auditResult?.categories || []),
+            detailedReason || 'AI审核完成，等待人工确认',
+            auditRecordStatus.toString()
+          ]
+        );
+      } catch (auditError) {
+        console.error('评论审核异常:', auditError);
+        // 审核异常时仍然记录到audit表，让管理员手动审核
+        await pool.execute(
+          `INSERT INTO audit (user_id, type, target_id, content, audit_result, risk_level, categories, reason, status, retry_count) 
+           VALUES (?, 3, NULL, ?, ?, ?, ?, ?, 0, 0)`,
+          [
+            userId.toString(),
+            sanitizedContent,
+            null,
+            'unknown',
+            JSON.stringify([]),
+            '审核服务异常，需人工审核'
+          ]
+        );
+      }
+    }
+
+    // 如果AI自动审核拒绝，不创建评论，直接返回被拒绝的提示
+    if (shouldDeleteComment) {
+      return res.status(HTTP_STATUS.OK).json({
+        code: RESPONSE_CODES.SUCCESS,
+        message: '评论已提交，但因内容违规被系统自动拒绝',
+        data: {
+          rejected: true,
+          reason: auditResult?.reason || '内容不符合社区规范'
+        }
+      });
+    }
+
     // 插入评论
     const [result] = await pool.execute(
-      'INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)',
-      [post_id.toString(), userId.toString(), sanitizedContent, parent_id ? parent_id.toString() : null]
+      'INSERT INTO comments (post_id, user_id, content, parent_id, audit_status, is_public, audit_result) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [
+        post_id.toString(), 
+        userId.toString(), 
+        sanitizedContent, 
+        parent_id ? parent_id.toString() : null,
+        auditStatus.toString(),
+        isPublic.toString(),
+        auditResult ? JSON.stringify(auditResult) : null
+      ]
     );
 
     const commentId = result.insertId;
+    
+    // 更新audit表中的target_id为评论ID
+    if (isAuditEnabled()) {
+      await pool.execute(
+        'UPDATE audit SET target_id = ? WHERE user_id = ? AND type = 3 AND target_id IS NULL ORDER BY id DESC LIMIT 1',
+        [commentId.toString(), userId.toString()]
+      );
+    }
 
     // 更新笔记评论数
     await pool.execute('UPDATE posts SET comment_count = comment_count + 1 WHERE id = ?', [post_id.toString()]);
@@ -238,16 +390,29 @@ router.get('/:id/replies', optionalAuth, async (req, res) => {
     const currentUserId = req.user ? req.user.id : null;
 
 
-    // 获取子评论
-    const [rows] = await pool.execute(
-      `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
+    // 获取子评论（只显示公开的或用户自己的）
+    let query;
+    let queryParams;
+    
+    if (currentUserId) {
+      query = `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
        FROM comments c
        LEFT JOIN users u ON c.user_id = u.id
-       WHERE c.parent_id = ?
+       WHERE c.parent_id = ? AND (c.is_public = 1 OR c.user_id = ?)
        ORDER BY c.created_at ASC
-       LIMIT ? OFFSET ?`,
-      [parentId.toString(), limit.toString(), offset.toString()]
-    );
+       LIMIT ? OFFSET ?`;
+      queryParams = [parentId.toString(), currentUserId.toString(), limit.toString(), offset.toString()];
+    } else {
+      query = `SELECT c.*, u.nickname, u.avatar as user_avatar, u.id as user_auto_id, u.user_id as user_display_id, u.location as user_location, u.verified
+       FROM comments c
+       LEFT JOIN users u ON c.user_id = u.id
+       WHERE c.parent_id = ? AND c.is_public = 1
+       ORDER BY c.created_at ASC
+       LIMIT ? OFFSET ?`;
+      queryParams = [parentId.toString(), limit.toString(), offset.toString()];
+    }
+    
+    const [rows] = await pool.execute(query, queryParams);
 
     // 为每个评论检查点赞状态
     for (let comment of rows) {
@@ -262,11 +427,17 @@ router.get('/:id/replies', optionalAuth, async (req, res) => {
       }
     }
 
-    // 获取总数
-    const [countResult] = await pool.execute(
-      'SELECT COUNT(*) as total FROM comments WHERE parent_id = ?',
-      [parentId.toString()]
-    );
+    // 获取总数（只统计公开的或用户自己的）
+    let countQuery;
+    let countParams;
+    if (currentUserId) {
+      countQuery = 'SELECT COUNT(*) as total FROM comments WHERE parent_id = ? AND (is_public = 1 OR user_id = ?)';
+      countParams = [parentId.toString(), currentUserId.toString()];
+    } else {
+      countQuery = 'SELECT COUNT(*) as total FROM comments WHERE parent_id = ? AND is_public = 1';
+      countParams = [parentId.toString()];
+    }
+    const [countResult] = await pool.execute(countQuery, countParams);
     const total = countResult[0].total;
 
 
