@@ -37,6 +37,7 @@ const formData = ref({
   tags: [],
   images: [],
   image_urls: [],
+  visibility: 0,  // 添加可见性字段，默认公开
   type: 1  // 添加type字段，默认为1（图文笔记）
 })
 
@@ -92,6 +93,18 @@ const formFields = computed(() => {
       type: 'select',
       placeholder: '请选择分类',
       options: categories.value,
+      required: true
+    },
+    {
+      key: 'visibility',
+      label: '可见性',
+      type: 'select',
+      placeholder: '请选择可见性',
+      options: [
+        { value: 0, label: '公开' },
+        { value: 1, label: '私密' },
+        { value: 2, label: '仅互关好友可见' }
+      ],
       required: true
     },
     {
@@ -157,6 +170,7 @@ const processPostData = (data) => {
     tags: data.tags || [],
     images: [],
     image_urls: [],
+    visibility: data.visibility !== undefined ? data.visibility : 0, // 可见性，默认公开
     video_url: data.video_url || '',
     cover_url: data.cover_url || '',
     video_upload: null,
@@ -324,7 +338,8 @@ const savePost = async (processedData) => {
       title: (processedData.title || '').trim(),
       content: (processedData.content || '').trim(),
       category_id: processedData.category,
-      tags: processedData.tags || []
+      tags: processedData.tags || [],
+      visibility: processedData.visibility !== undefined ? processedData.visibility : 0
     }
 
     // 根据笔记类型处理媒体数据
