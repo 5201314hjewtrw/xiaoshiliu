@@ -892,7 +892,7 @@ const loadDraftData = async (draftId) => {
         }
       }
 
-      // 处理标签数据：确保转换为字符串数组（从内容中提取）
+      // 处理标签数据：确保转换为字符串数组（标签从内容中提取，这里只是格式化现有的草稿标签）
       if (draft.tags && Array.isArray(draft.tags)) {
         form.tags = draft.tags.map(tag => {
           // 如果是对象格式，提取name字段

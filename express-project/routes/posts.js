@@ -1452,7 +1452,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const { title, content, category_id, images, video, tags, is_draft, attachment, paymentSettings, visibility } = req.body;
     const userId = req.user.id;
 
-    // 验证必填字段：如果不是草稿（is_draft=0），则要求标题和内容不能为空（分类已改为可选）
+    // 验证必填字段：如果不是草稿（is_draft=0），则要求标题和内容不能为空
     if (!is_draft && (!title || !content)) {
       console.log('验证失败 - 必填字段缺失:', { title, content, is_draft });
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题和内容不能为空' });

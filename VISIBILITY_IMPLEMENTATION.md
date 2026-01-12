@@ -85,7 +85,7 @@ mysql -u root -p xiaoshiliu < express-project/scripts/add-visibility-settings.sq
 **Tag Extraction:**
 ```javascript
 function extractTagsFromContent(content) {
-  const tagRegex = /#([a-zA-Z0-9\u4e00-\u9fa5_]+)/g
+  const tagRegex = /#([a-zA-Z0-9\u4e00-\u9fa5_-]+)/g
   const matches = [...content.matchAll(tagRegex)]
   const tags = matches.map(match => match[1])
   return [...new Set(tags)].slice(0, 10) // Dedupe and limit to 10 tags
