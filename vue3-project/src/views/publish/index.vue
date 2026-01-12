@@ -6,11 +6,11 @@
       </div>
       <div class="header-right">
         <button class="draft-box-btn" @click="goToDraftBox">
-          <SvgIcon name="draft" width="20" height="20" color="white" />
+          <SvgIcon name="draft" width="18" height="18" color="white" />
           <span>草稿箱</span>
         </button>
         <button class="manage-btn" @click="goToPostManagement">
-          <SvgIcon name="post" width="20" height="20" />
+          <SvgIcon name="post" width="18" height="18" />
           <span>笔记管理</span>
         </button>
       </div>
@@ -27,136 +27,174 @@
       </div>
 
       <form v-if="isLoggedIn" @submit.prevent="handlePublish" class="publish-form">
-        <div class="upload-section">
-          <!-- Tab选项 -->
-          <div class="upload-tabs">
-            <button 
-              type="button" 
-              class="tab-btn" 
-              :class="{ active: uploadType === 'image' }"
-              @click="switchUploadType('image')"
-            >
-              上传图文
-            </button>
-            <button 
-              type="button" 
-              class="tab-btn" 
-              :class="{ active: uploadType === 'video' }"
-              @click="switchUploadType('video')"
-            >
-              上传视频
-            </button>
-          </div>
+        <!-- 新布局：左右两栏 -->
+        <div class="publish-layout">
+          <!-- 左侧：媒体上传区 -->
+          <div class="publish-left">
+            <div class="card upload-card">
+              <div class="card-header">
+                <h3 class="card-title">上传媒体</h3>
+                <!-- Tab选项 -->
+                <div class="upload-tabs">
+                  <button 
+                    type="button" 
+                    class="tab-btn" 
+                    :class="{ active: uploadType === 'image' }"
+                    @click="switchUploadType('image')"
+                  >
+                    <SvgIcon name="imgNote" width="16" height="16" />
+                    图文
+                  </button>
+                  <button 
+                    type="button" 
+                    class="tab-btn" 
+                    :class="{ active: uploadType === 'video' }"
+                    @click="switchUploadType('video')"
+                  >
+                    <SvgIcon name="video" width="16" height="16" />
+                    视频
+                  </button>
+                </div>
+              </div>
+              
+              <!-- 上传组件 -->
+              <div class="upload-content">
+                <MultiImageUpload 
+                  v-if="uploadType === 'image'"
+                  ref="multiImageUploadRef" 
+                  v-model="form.images" 
+                  :max-images="9" 
+                  :allow-delete-last="true"
+                  :payment-enabled="form.paymentSettings.enabled"
+                  @error="handleUploadError" 
+                />
+                <VideoUpload 
+                  v-if="uploadType === 'video'"
+                  ref="videoUploadRef"
+                  v-model="form.video"
+                  @error="handleUploadError"
+                />
+              </div>
 
-          <!-- 上传组件 -->
-          <div class="upload-content">
-            <MultiImageUpload 
-              v-if="uploadType === 'image'"
-              ref="multiImageUploadRef" 
-              v-model="form.images" 
-              :max-images="9" 
-              :allow-delete-last="true"
-              :payment-enabled="form.paymentSettings.enabled"
-              @error="handleUploadError" 
-            />
-            <VideoUpload 
-              v-if="uploadType === 'video'"
-              ref="videoUploadRef"
-              v-model="form.video"
-              @error="handleUploadError"
-            />
-          </div>
-
-          <div v-if="uploadType === 'image'" class="text-image-section">
-            <button type="button" class="text-image-btn" @click="openTextImageModal">
-              <SvgIcon name="magic" width="16" height="16" />
-              <span>文字配图</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="input-section">
-          <input v-model="form.title" type="text" class="title-input" placeholder="请输入标题" maxlength="100"
-            @input="validateForm" />
-          <div class="char-count">{{ form.title.length }}/100</div>
-        </div>
-
-        <div class="input-section">
-          <div class="content-input-wrapper">
-            <ContentEditableInput ref="contentTextarea" v-model="form.content" :input-class="'content-textarea'"
-              placeholder="请输入内容" :enable-mention="true" :mention-users="mentionUsers" @focus="handleContentFocus"
-              @blur="handleContentBlur" @keydown="handleInputKeydown" @mention="handleMentionInput" />
-            <div class="content-actions">
-              <button type="button" class="mention-btn" @click="toggleMentionPanel">
-                <SvgIcon name="mention" class="mention-icon" width="20" height="20" />
-              </button>
-              <button type="button" class="emoji-btn" @click="toggleEmojiPanel">
-                <SvgIcon name="emoji" class="emoji-icon" width="20" height="20" />
-              </button>
-              <button type="button" class="attachment-btn" @click="openAttachmentModal">
-                <SvgIcon name="attachment" class="attachment-icon" width="20" height="20" />
-              </button>
-            </div>
-          </div>
-          <div class="char-count">{{ form.content.length }}/2000</div>
-
-          <!-- 附件预览 -->
-          <div v-if="form.attachment" class="attachment-preview">
-            <div class="attachment-info">
-              <SvgIcon name="attachment" width="16" height="16" />
-              <span class="attachment-name">{{ form.attachment.name }}</span>
-              <span class="attachment-size">({{ formatAttachmentSize(form.attachment.size) }})</span>
-            </div>
-            <button type="button" class="remove-attachment-btn" @click="removeAttachment">
-              <SvgIcon name="close" width="14" height="14" />
-            </button>
-          </div>
-
-          <!-- 付费设置按钮 -->
-          <div class="payment-settings-section">
-            <button type="button" class="payment-settings-btn" :class="{ active: form.paymentSettings.enabled }" @click="openPaymentModal">
-              <span class="payment-icon">🍒</span>
-              <span class="payment-text">
-                <template v-if="form.paymentSettings.enabled">
-                  已设置付费：{{ form.paymentSettings.price }} 石榴点
-                </template>
-                <template v-else>
-                  设置付费内容
-                </template>
-              </span>
-              <SvgIcon name="right" width="16" height="16" class="payment-arrow" />
-            </button>
-          </div>
-
-          <div v-if="showEmojiPanel" class="emoji-panel-overlay" v-click-outside="closeEmojiPanel">
-            <div class="emoji-panel" @click.stop>
-              <EmojiPicker @select="handleEmojiSelect" />
+              <div v-if="uploadType === 'image'" class="text-image-section">
+                <button type="button" class="text-image-btn" @click="openTextImageModal">
+                  <SvgIcon name="magic" width="16" height="16" />
+                  <span>文字配图</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          <MentionModal :visible="showMentionPanel" @close="closeMentionPanel" @select="handleMentionSelect" />
-        </div>
+          <!-- 右侧：内容编辑区 -->
+          <div class="publish-right">
+            <!-- 标题和内容卡片 -->
+            <div class="card content-card">
+              <div class="card-header">
+                <h3 class="card-title">笔记内容</h3>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">标题</label>
+                <div class="input-wrapper">
+                  <input v-model="form.title" type="text" class="title-input" placeholder="给笔记起个标题吧" maxlength="100"
+                    @input="validateForm" />
+                  <div class="char-count">{{ form.title.length }}/100</div>
+                </div>
+              </div>
 
-        <div class="category-section">
-          <div class="section-title">分类</div>
-          <DropdownSelect v-model="form.category_id" :options="categories" placeholder="请选择分类" label-key="name"
-            value-key="id" max-width="300px" min-width="200px" @change="handleCategoryChange" />
-        </div>
+              <div class="form-group">
+                <label class="form-label">正文</label>
+                <div class="content-input-wrapper">
+                  <ContentEditableInput ref="contentTextarea" v-model="form.content" :input-class="'content-textarea'"
+                    placeholder="分享你的想法..." :enable-mention="true" :mention-users="mentionUsers" @focus="handleContentFocus"
+                    @blur="handleContentBlur" @keydown="handleInputKeydown" @mention="handleMentionInput" />
+                  <div class="content-footer">
+                    <div class="content-actions">
+                      <button type="button" class="action-btn" @click="toggleMentionPanel" title="@好友">
+                        <SvgIcon name="mention" width="18" height="18" />
+                      </button>
+                      <button type="button" class="action-btn" @click="toggleEmojiPanel" title="表情">
+                        <SvgIcon name="emoji" width="18" height="18" />
+                      </button>
+                      <button type="button" class="action-btn" @click="openAttachmentModal" title="附件">
+                        <SvgIcon name="attachment" width="18" height="18" />
+                      </button>
+                    </div>
+                    <div class="char-count">{{ form.content.length }}/2000</div>
+                  </div>
+                </div>
+              </div>
 
-        <div class="tag-section">
-          <div class="section-title">标签 (最多10个)</div>
-          <TagSelector v-model="form.tags" :max-tags="10" />
+              <!-- 附件预览 -->
+              <div v-if="form.attachment" class="attachment-preview">
+                <div class="attachment-info">
+                  <SvgIcon name="attachment" width="16" height="16" />
+                  <span class="attachment-name">{{ form.attachment.name }}</span>
+                  <span class="attachment-size">({{ formatAttachmentSize(form.attachment.size) }})</span>
+                </div>
+                <button type="button" class="remove-attachment-btn" @click="removeAttachment">
+                  <SvgIcon name="close" width="14" height="14" />
+                </button>
+              </div>
+
+              <div v-if="showEmojiPanel" class="emoji-panel-overlay" v-click-outside="closeEmojiPanel">
+                <div class="emoji-panel" @click.stop>
+                  <EmojiPicker @select="handleEmojiSelect" />
+                </div>
+              </div>
+
+              <MentionModal :visible="showMentionPanel" @close="closeMentionPanel" @select="handleMentionSelect" />
+            </div>
+
+            <!-- 分类和标签卡片 -->
+            <div class="card settings-card">
+              <div class="card-header">
+                <h3 class="card-title">发布设置</h3>
+              </div>
+              
+              <div class="form-group">
+                <label class="form-label">分类</label>
+                <DropdownSelect v-model="form.category_id" :options="categories" placeholder="选择一个分类" label-key="name"
+                  value-key="id" max-width="100%" min-width="100%" @change="handleCategoryChange" />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">标签 <span class="label-hint">(最多10个)</span></label>
+                <TagSelector v-model="form.tags" :max-tags="10" />
+              </div>
+
+              <!-- 付费设置 -->
+              <div class="form-group">
+                <label class="form-label">付费设置</label>
+                <button type="button" class="payment-settings-btn" :class="{ active: form.paymentSettings.enabled }" @click="openPaymentModal">
+                  <span class="payment-icon">🍒</span>
+                  <span class="payment-text">
+                    <template v-if="form.paymentSettings.enabled">
+                      已设置：{{ form.paymentSettings.price }} 石榴点
+                    </template>
+                    <template v-else>
+                      设置付费内容
+                    </template>
+                  </span>
+                  <SvgIcon name="right" width="16" height="16" class="payment-arrow" />
+                </button>
+              </div>
+            </div>
+
+            <!-- 发布操作按钮 -->
+            <div class="publish-actions">
+              <button type="button" class="draft-btn" :disabled="!canSaveDraft || isSavingDraft" @click="handleSaveDraft">
+                <SvgIcon v-if="isSavingDraft" name="loading" width="16" height="16" class="loading-icon" />
+                {{ isSavingDraft ? '保存中...' : '存草稿' }}
+              </button>
+              <button type="submit" class="publish-btn" :disabled="!canPublish || isPublishing" @click="handlePublish">
+                <SvgIcon v-if="isPublishing" name="loading" width="16" height="16" class="loading-icon" />
+                {{ isPublishing ? '发布中...' : '发布笔记' }}
+              </button>
+            </div>
+          </div>
         </div>
       </form>
-
-      <div v-if="isLoggedIn" class="publish-actions">
-        <button class="draft-btn" :disabled="!canSaveDraft || isSavingDraft" @click="handleSaveDraft">
-          {{ isSavingDraft ? '保存中...' : '存草稿' }}
-        </button>
-        <button class="publish-btn" :disabled="!canPublish || isPublishing" @click="handlePublish">
-          {{ isPublishing ? '发布中...' : '发布' }}
-        </button>
-      </div>
     </div>
 
     <MessageToast v-if="showToast" :message="toastMessage" :type="toastType" @close="handleToastClose" />
@@ -1059,29 +1097,29 @@ const handleSaveDraft = async () => {
 </script>
 
 <style scoped>
+/* ===== 基础容器样式 ===== */
 .publish-container {
   min-height: 100vh;
-  background: var(--bg-color-primary);
+  background: var(--bg-color-secondary);
   color: var(--text-color-primary);
-  padding-bottom: calc(48px + constant(safe-area-inset-bottom));
   padding-bottom: calc(48px + env(safe-area-inset-bottom));
-  margin: 72px auto;
-  min-width: 700px;
-  max-width: 700px;
+  margin: 72px auto 0;
+  max-width: 1200px;
   transition: background-color 0.2s ease;
 }
 
+/* ===== 页头样式 ===== */
 .publish-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem;
+  padding: 1rem 1.5rem;
   background: var(--bg-color-primary);
   border-bottom: 1px solid var(--border-color-primary);
   position: sticky;
   top: 0;
   z-index: 100;
-  transition: background-color 0.2s ease,border-color 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .header-left {
@@ -1093,193 +1131,203 @@ const handleSaveDraft = async () => {
 .header-right {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-}
-
-.draft-box-btn {
-  display: flex;
-  align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
-
-.draft-box-btn:hover {
-  background: var(--primary-color-dark);
-}
-
-.manage-btn {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 1rem;
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
-
-.manage-btn:hover {
-  background: var(--primary-color-dark);
 }
 
 .page-title {
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   font-weight: 600;
   margin: 0;
   color: var(--text-color-primary);
 }
 
-.header-actions {
+.draft-box-btn,
+.manage-btn {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-}
-
-.draft-btn {
-  width: 20%;
-  padding: 12px;
-  background-color: var(--text-color-secondary);
+  gap: 0.4rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--primary-color);
   color: white;
   border: none;
-  border-radius: 6px;
-  font-size: 16px;
-  font-weight: 500;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.draft-btn:hover:not(:disabled) {
-  background: var(--text-color-primary);
-}
-
-.draft-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.publish-btn {
-  width: 20%;
-  padding: 12px;
-  background-color: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 16px;
+  font-size: 0.875rem;
   font-weight: 500;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  transition: all 0.2s ease;
 }
 
-.publish-btn:hover:not(:disabled) {
+.draft-box-btn:hover,
+.manage-btn:hover {
   background: var(--primary-color-dark);
+  transform: translateY(-1px);
 }
 
-.publish-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.loading-icon {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
+/* ===== 主内容区域 ===== */
 .publish-content {
-  padding: 1rem;
-  max-width: 600px;
-  margin: 0 auto;
-  background-color: var(--bg-color-primary);
+  padding: 1.5rem;
+  background: var(--bg-color-secondary);
   transition: background-color 0.2s ease;
 }
 
 .publish-form {
   display: flex;
   flex-direction: column;
+}
+
+/* ===== 两栏布局 ===== */
+.publish-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.publish-left,
+.publish-right {
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
 }
 
-.upload-section {
-  margin-bottom: 0.5rem;
+/* ===== 卡片样式 ===== */
+.card {
+  background: var(--bg-color-primary);
+  border-radius: 12px;
+  border: 1px solid var(--border-color-primary);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color-primary);
+  background: var(--bg-color-primary);
+}
+
+.card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-color-primary);
+}
+
+/* ===== 上传区域样式 ===== */
+.upload-card .card-header {
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .upload-tabs {
   display: flex;
-  margin-bottom: 1rem;
-  border-bottom: 1px solid var(--border-color-primary);
+  gap: 0.25rem;
+  background: var(--bg-color-secondary);
+  padding: 4px;
+  border-radius: 8px;
 }
 
 .tab-btn {
-  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1rem;
   border: none;
   background: transparent;
   color: var(--text-color-secondary);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  border-bottom: 2px solid transparent;
-  position: relative;
+  border-radius: 6px;
 }
 
 .tab-btn:hover {
   color: var(--text-color-primary);
+  background: var(--bg-color-primary);
 }
 
 .tab-btn.active {
   color: var(--primary-color);
-  border-bottom-color: var(--primary-color);
+  background: var(--bg-color-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .upload-content {
-  margin-bottom: 1rem;
+  padding: 1.25rem;
 }
 
-.image-upload-section {
+.text-image-section {
+  padding: 0 1.25rem 1.25rem;
+}
+
+.text-image-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-color-dark));
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.text-image-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(var(--primary-color-rgb), 0.3);
+}
+
+/* ===== 内容编辑卡片样式 ===== */
+.content-card,
+.settings-card {
+  padding-bottom: 0;
+}
+
+.form-group {
+  padding: 0 1.25rem 1.25rem;
+}
+
+.form-group:first-of-type {
+  padding-top: 1.25rem;
+}
+
+.form-label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-color-primary);
   margin-bottom: 0.5rem;
 }
 
-.input-section {
+.label-hint {
+  font-weight: 400;
+  color: var(--text-color-tertiary);
+}
+
+.input-wrapper {
   position: relative;
 }
 
 .title-input {
   width: 100%;
-  padding: 10px;
+  padding: 0.75rem 1rem;
+  padding-right: 4rem;
   border: 1px solid var(--border-color-primary);
   border-radius: 8px;
   background: var(--bg-color-primary);
   color: var(--text-color-primary);
-  font-size: 16px;
-  font-weight: bold;
+  font-size: 1rem;
+  font-weight: 500;
   transition: all 0.2s ease;
   box-sizing: border-box;
 }
@@ -1287,38 +1335,51 @@ const handleSaveDraft = async () => {
 .title-input:focus {
   outline: none;
   border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.1);
 }
 
 .title-input::placeholder {
-  color: var(--text-color-secondary);
+  color: var(--text-color-tertiary);
+  font-weight: 400;
 }
 
+.input-wrapper .char-count {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
+  color: var(--text-color-tertiary);
+  background: transparent;
+  padding: 0;
+}
+
+/* ===== 内容输入区域 ===== */
 .content-input-wrapper {
-  position: relative;
   border: 1px solid var(--border-color-primary);
   border-radius: 8px;
   background: var(--bg-color-primary);
   transition: all 0.2s ease;
+  overflow: hidden;
 }
 
 .content-input-wrapper:focus-within {
   border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.1);
 }
 
 .content-textarea {
   width: 100%;
-  padding: 1rem;
-  padding-bottom: 3rem;
+  padding: 0.875rem 1rem;
   border: none;
-  border-radius: 8px;
   background: transparent;
   color: var(--text-color-primary);
-  font-size: 16px;
-  line-height: 1.5;
-  transition: all 0.2s ease;
-  min-height: 120px;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  min-height: 160px;
   box-sizing: border-box;
   caret-color: var(--primary-color);
+  resize: none;
 }
 
 .content-textarea:focus {
@@ -1327,22 +1388,26 @@ const handleSaveDraft = async () => {
 
 .content-textarea:empty:before {
   content: attr(placeholder);
-  color: var(--text-color-secondary);
+  color: var(--text-color-tertiary);
   pointer-events: none;
 }
 
-.content-actions {
-  position: absolute;
-  bottom: 0.5rem;
-  left: 1rem;
+.content-footer {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border-color-primary);
+  background: var(--bg-color-secondary);
 }
 
-.emoji-btn,
-.mention-btn,
-.attachment-btn {
+.content-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.action-btn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1351,47 +1416,43 @@ const handleSaveDraft = async () => {
   border: none;
   background: transparent;
   color: var(--text-color-secondary);
-  border-radius: 50%;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.emoji-btn:hover,
-.mention-btn:hover,
-.attachment-btn:hover {
-  background: var(--bg-color-secondary);
-  color: var(--text-color-primary);
+.action-btn:hover {
+  background: var(--bg-color-primary);
+  color: var(--primary-color);
 }
 
-.emoji-icon,
-.mention-icon,
-.attachment-icon {
-  width: 20px;
-  height: 20px;
+.content-footer .char-count {
+  font-size: 0.75rem;
+  color: var(--text-color-tertiary);
 }
 
-/* 附件预览样式 */
+/* ===== 附件预览样式 ===== */
 .attachment-preview {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  margin-top: 8px;
+  padding: 0.625rem 0.875rem;
+  margin: 0 1.25rem 1.25rem;
   background: var(--bg-color-secondary);
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid var(--border-color-primary);
 }
 
 .attachment-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0.5rem;
   color: var(--text-color-secondary);
   overflow: hidden;
 }
 
 .attachment-name {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--text-color-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -1400,7 +1461,7 @@ const handleSaveDraft = async () => {
 }
 
 .attachment-size {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--text-color-tertiary);
 }
 
@@ -1424,17 +1485,13 @@ const handleSaveDraft = async () => {
   color: white;
 }
 
-/* 付费设置按钮样式 */
-.payment-settings-section {
-  margin-top: 12px;
-}
-
+/* ===== 付费设置按钮样式 ===== */
 .payment-settings-btn {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0.5rem;
   width: 100%;
-  padding: 12px 16px;
+  padding: 0.75rem 1rem;
   background: var(--bg-color-secondary);
   border: 1px solid var(--border-color-primary);
   border-radius: 8px;
@@ -1455,14 +1512,14 @@ const handleSaveDraft = async () => {
 }
 
 .payment-icon {
-  font-size: 18px;
+  font-size: 1.125rem;
   line-height: 1;
 }
 
 .payment-text {
   flex: 1;
   text-align: left;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .payment-arrow {
@@ -1473,13 +1530,14 @@ const handleSaveDraft = async () => {
   color: var(--primary-color);
 }
 
+/* ===== Emoji面板样式 ===== */
 .emoji-panel-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1498,313 +1556,84 @@ const handleSaveDraft = async () => {
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes scaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.8);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
 
-.char-count {
-  position: absolute;
-  bottom: 0.5rem;
-  right: 0.75rem;
-  font-size: 0.8rem;
-  color: var(--text-color-secondary);
-  background: var(--bg-color-primary);
-  padding: 0.25rem;
-  transition: background-color 0.2s ease;
-}
-
-
-.section-title {
-  font-size: 0.9rem;
-  font-weight: 500;
-  color: var(--text-color-primary);
-  margin-bottom: 0.75rem;
-}
-
-.tag-input-wrapper {
-  border: 1px solid var(--border-color-primary);
-  border-radius: 8px;
-  background: var(--bg-color-primary);
-  padding: 0.75rem;
-  transition: border-color 0.2s ease;
-}
-
-.tag-input-wrapper:focus-within {
-  border-color: var(--primary-color);
-}
-
-.selected-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
-}
-
-.selected-tag {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.4rem 0.6rem;
-  background: var(--primary-color);
-  color: var(--button-text-color);
-  border-radius: 16px;
-  font-size: 0.8rem;
-  animation: fadeIn 0.2s ease;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.8);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.remove-tag-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border: none;
-  background: rgba(255, 255, 255, 0.2);
-  color: white;
-  border-radius: 50%;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 12px;
-  line-height: 1;
-}
-
-.remove-tag-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
-  transform: scale(1.1);
-}
-
-.tag-input-container {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.tag-input {
-  flex: 1;
-  border: none;
-  background: transparent;
-  color: var(--text-color-primary);
-  font-size: 0.9rem;
-  outline: none;
-  padding: 0.25rem 0;
-}
-
-.tag-input:disabled {
-  background-color: var(--disabled-bg);
-  cursor: not-allowed;
-}
-
-.tag-input::placeholder {
-  color: var(--text-color-secondary);
-}
-
-.add-tag-btn {
-  padding: 0.25rem 0.75rem;
-  background: var(--primary-color);
-  color: white;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.add-tag-btn:hover {
-  background: var(--primary-color-dark);
-}
-
-.tag-suggestions {
-  margin-top: 0.75rem;
-  padding: 0.75rem;
-  background: var(--bg-color-secondary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color-primary);
-}
-
-.suggestions-title {
-  font-size: 0.8rem;
-  color: var(--text-color-secondary);
-  margin-bottom: 0.5rem;
-}
-
-.suggestions-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.tag-suggestion {
-  padding: 0.4rem 0.8rem;
-  border: 1px solid var(--border-color-primary);
-  border-radius: 16px;
-  background: var(--bg-color-primary);
-  color: var(--text-color-primary);
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tag-suggestion:hover {
-  border-color: var(--primary-color);
-  background: var(--primary-color);
-  color: white;
-}
-
-.recommended-tags {
-  margin-top: 0.75rem;
-  padding: 0.75rem;
-  background: var(--bg-color-secondary);
-  border-radius: 8px;
-  border: 1px solid var(--border-color-primary);
-}
-
-.recommendations-title {
-  font-size: 0.8rem;
-  color: var(--text-color-secondary);
-  margin-bottom: 0.5rem;
-}
-
-.tags-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.tag-item {
-  padding: 0.4rem 0.8rem;
-  border: 1px solid var(--border-color-primary);
-  border-radius: 16px;
-  background: var(--bg-color-primary);
-  color: var(--text-color-primary);
-  font-size: 0.8rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.tag-item:hover {
-  border-color: var(--primary-color);
-  background: var(--primary-color);
-  color: white;
-}
-
-.tag-item.active {
-  background: var(--primary-color);
-  color: white;
-  border-color: var(--primary-color);
-}
-
-.category-section {
-  margin-bottom: 1rem;
-}
-
-
-
+/* ===== 发布操作按钮区域 ===== */
 .publish-actions {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 1rem;
-  padding: 2rem 1rem;
-  margin-top: 2rem;
-  background: var(--bg-color-primary);
+  gap: 0.75rem;
+  padding-top: 0.5rem;
 }
 
-.publish-actions .cancel-btn {
-  padding: 0.75rem 1.5rem;
-  background: transparent;
-  color: var(--text-color-secondary);
-  border: 1px solid var(--border-color-primary);
-  border-radius: 8px;
-  font-size: 0.9rem;
-  font-weight: 500;
+.draft-btn,
+.publish-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.9375rem;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 100px;
 }
 
+.draft-btn {
+  background: var(--bg-color-secondary);
+  color: var(--text-color-secondary);
+  border: 1px solid var(--border-color-primary);
+}
 
+.draft-btn:hover:not(:disabled) {
+  background: var(--bg-color-primary);
+  color: var(--text-color-primary);
+  border-color: var(--text-color-tertiary);
+}
 
-.publish-actions .loading-icon {
+.publish-btn {
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-color-dark));
+  color: white;
+  box-shadow: 0 4px 12px rgba(var(--primary-color-rgb), 0.25);
+}
+
+.publish-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(var(--primary-color-rgb), 0.35);
+}
+
+.draft-btn:disabled,
+.publish-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.loading-icon {
   animation: spin 1s linear infinite;
 }
 
 @keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
-/* 响应式设计 */
-@media (max-width: 960px) {
-  .publish-container {
-    min-width: 100%;
-    max-width: 100%;
-    margin: 72px 0;
-  }
-
-  .publish-header {
-    padding: 0.75rem 1rem;
-  }
-
-  .header-right {
-    gap: 0.5rem;
-  }
-
-  .draft-box-btn,
-  .manage-btn {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.8rem;
-  }
-
-  .publish-content {
-    padding: 0.75rem;
-  }
-
-  .publish-actions {
-    padding: 1rem 0.75rem;
-  }
-}
-
-/* 登录提示样式 */
+/* ===== 登录提示样式 ===== */
 .login-prompt {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 80px 20px;
+  padding: 100px 20px;
   text-align: center;
 }
 
@@ -1816,121 +1645,114 @@ const handleSaveDraft = async () => {
 
 .prompt-icon {
   color: var(--text-color-quaternary);
-  margin-bottom: 16px;
+  margin-bottom: 1rem;
 }
 
 .prompt-content h3 {
   color: var(--text-color-primary);
-  font-size: 18px;
+  font-size: 1.25rem;
   font-weight: 600;
-  margin: 0 0 8px 0;
+  margin: 0 0 0.5rem 0;
 }
 
 .prompt-content p {
   color: var(--text-color-secondary);
-  font-size: 14px;
-  margin: 0 0 20px 0;
+  font-size: 0.9375rem;
+  margin: 0;
   line-height: 1.5;
 }
 
-.tag-input {
-  min-width: 80px;
-}
-
-.publish-actions {
-  padding: 1.5rem 0.75rem;
-  gap: 0.75rem;
-}
-
-.publish-actions .cancel-btn,
-.publish-actions .draft-btn,
-.publish-actions .publish-btn {
-  padding: 0.6rem 1.2rem;
-  font-size: 0.85rem;
-  min-width: 80px;
-}
-
-@media (max-width: 480px) {
-  .publish-header {
-    padding: 16px 14px;
-  }
-
-  .page-title {
-    margin-left: 12px;
-  }
-
-  .header-actions {
-    gap: 0.5rem;
-  }
-
-  .cancel-btn {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.8rem;
-  }
-
-  .draft-btn {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.8rem;
-  }
-
-  .publish-btn {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.8rem;
+/* ===== 响应式设计 ===== */
+@media (max-width: 960px) {
+  .publish-container {
+    margin: 72px 0 0;
   }
 
   .publish-content {
     padding: 1rem;
   }
 
+  .publish-layout {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
 
-  .tag-input {
-    min-width: 60px;
-    font-size: 0.85rem;
+  .publish-header {
+    padding: 0.875rem 1rem;
+  }
+
+  .draft-box-btn,
+  .manage-btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8125rem;
+  }
+
+  .draft-box-btn span,
+  .manage-btn span {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .publish-content {
+    padding: 0.75rem;
+  }
+
+  .card-header {
+    padding: 0.875rem 1rem;
+  }
+
+  .upload-content,
+  .text-image-section {
+    padding: 1rem;
+  }
+
+  .form-group {
+    padding: 0 1rem 1rem;
+  }
+
+  .form-group:first-of-type {
+    padding-top: 1rem;
   }
 
   .publish-actions {
-    padding: 1rem 0.5rem;
-    gap: 0.5rem;
     flex-direction: column;
   }
 
+  .draft-btn,
+  .publish-btn {
+    width: 100%;
+  }
+
+  .page-title {
+    font-size: 1.125rem;
+  }
+
+  .upload-tabs {
+    width: 100%;
+  }
+
+  .tab-btn {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .upload-card .card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
-.text-image-section {
-  margin-top: 0.75rem;
-  display: flex;
-  justify-content: flex-start;
-}
-
-.text-image-btn {
-  display: flex;
-  align-items: center;
-  padding: 0.4rem;
-  background: var(--primary-color);
-  color: var(--button-text-color);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
-
-.text-image-btn:hover {
-  background: var(--primary-color-dark);
-}
-
-.text-image-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.2);
-}
-
-.publish-actions .cancel-btn,
-.publish-actions .draft-btn,
-.publish-actions .publish-btn {
-  width: 100%;
-  padding: 0.75rem;
+/* ===== 保留的旧样式兼容 ===== */
+.section-title {
   font-size: 0.9rem;
-  min-width: unset;
+  font-weight: 500;
+  color: var(--text-color-primary);
+  margin-bottom: 0.75rem;
+}
+
+.char-count {
+  font-size: 0.75rem;
+  color: var(--text-color-tertiary);
 }
 </style>
