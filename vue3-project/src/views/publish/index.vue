@@ -246,8 +246,8 @@ import PaymentSettingsModal from '@/components/PaymentSettingsModal.vue'
 function extractTagsFromContent(content) {
   if (!content) return []
   
-  // 匹配 #标签 格式，支持中文、英文、数字、下划线
-  const tagRegex = /#([a-zA-Z0-9\u4e00-\u9fa5_]+)/g
+  // 匹配 #标签 格式，支持中文、英文、数字、下划线、连字符
+  const tagRegex = /#([a-zA-Z0-9\u4e00-\u9fa5_-]+)/g
   const matches = [...content.matchAll(tagRegex)]
   const tags = matches.map(match => match[1])
   
@@ -1809,10 +1809,6 @@ const handleSaveDraft = async () => {
   color: var(--text-color-secondary);
   line-height: 1.5;
 }
-  margin-bottom: 1rem;
-}
-
-
 
 .publish-actions {
   display: flex;

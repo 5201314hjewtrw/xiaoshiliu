@@ -16,6 +16,9 @@ const {
   protectPostDetail 
 } = require('../utils/paidContentHelper');
 
+// 可见性常量
+const VALID_VISIBILITY_VALUES = ['public', 'private', 'mutual_followers'];
+
 /**
  * 检查用户是否可以查看笔记（基于可见性设置）
  * @param {Object} post - 笔记对象
@@ -907,8 +910,7 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 
     // 验证可见性设置
-    const validVisibilities = ['public', 'private', 'mutual_followers'];
-    if (postVisibility && !validVisibilities.includes(postVisibility)) {
+    if (postVisibility && !VALID_VISIBILITY_VALUES.includes(postVisibility)) {
       console.log('❌ 验证失败: 无效的可见性设置');
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '无效的可见性设置' });
     }
@@ -1457,8 +1459,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     }
 
     // 验证可见性设置
-    const validVisibilities = ['public', 'private', 'mutual_followers'];
-    if (visibility && !validVisibilities.includes(visibility)) {
+    if (visibility && !VALID_VISIBILITY_VALUES.includes(visibility)) {
       console.log('❌ 验证失败: 无效的可见性设置');
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '无效的可见性设置' });
     }
