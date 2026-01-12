@@ -461,6 +461,9 @@ router.get('/following', authenticateToken, async (req, res) => {
       queryParams.push(type.toString());
     }
 
+    // 添加可见性过滤
+    const visibilityFilter = getVisibilityWhereClause(currentUserId, 'p');
+
     // 获取关注用户的笔记
     const query = `
       SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified, c.name as category
@@ -468,18 +471,26 @@ router.get('/following', authenticateToken, async (req, res) => {
       LEFT JOIN users u ON p.user_id = u.id
       LEFT JOIN categories c ON p.category_id = c.id
       WHERE p.is_draft = 0 
+        AND ${visibilityFilter.condition}
         AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
         ${typeCondition}
       ${orderBy}
       LIMIT ? OFFSET ?
     `;
+    queryParams = [...visibilityFilter.params, currentUserId.toString()];
+    if (type) {
+      queryParams.push(type.toString());
+    }
     queryParams.push(limit.toString(), offset.toString());
 
     const [rows] = await pool.execute(query, queryParams);
 
+    // 应用可见性过滤（特别是互关好友的情况需要额外检查）
+    const filteredRows = await filterPostsByVisibility(rows, currentUserId);
+
     // 如果有笔记，使用批量查询优化性能
-    if (rows.length > 0) {
-      const postIds = rows.map(post => post.id);
+    if (filteredRows.length > 0) {
+      const postIds = filteredRows.map(post => post.id);
       // 创建占位符字符串和参数数组
       const placeholders = postIds.map(() => '?').join(',');
 
@@ -557,7 +568,7 @@ router.get('/following', authenticateToken, async (req, res) => {
       const purchasedPostIds = new Set(allPurchases.map(p => p.post_id));
 
       // 为每个笔记填充数据
-      for (let post of rows) {
+      for (let post of filteredRows) {
         // 使用助手函数处理付费内容保护
         const paymentSetting = paymentSettingsByPostId[post.id];
         const isAuthor = post.user_id === currentUserId;
@@ -595,7 +606,7 @@ router.get('/following', authenticateToken, async (req, res) => {
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
-        posts: rows,
+        posts: filteredRows,
         hasFollowing: true,
         pagination: {
           page,
@@ -1040,20 +1051,26 @@ router.get('/search', optionalAuth, async (req, res) => {
 
     console.log(`🔍 搜索笔记 - 关键词: ${keyword}, 页码: ${page}, 每页: ${limit}, 当前用户ID: ${currentUserId}`);
 
+    // 添加可见性过滤
+    const visibilityFilter = getVisibilityWhereClause(currentUserId, 'p');
+
     // 搜索笔记：支持标题和内容搜索（只搜索已激活的笔记）
     const [rows] = await pool.execute(
       `SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified
        FROM posts p
        LEFT JOIN users u ON p.user_id = u.id
-       WHERE p.is_draft = 0 AND (p.title LIKE ? OR p.content LIKE ?)
+       WHERE p.is_draft = 0 AND ${visibilityFilter.condition} AND (p.title LIKE ? OR p.content LIKE ?)
        ORDER BY p.created_at DESC
        LIMIT ? OFFSET ?`,
-      [`%${keyword}%`, `%${keyword}%`, limit.toString(), offset.toString()]
+      [...visibilityFilter.params, `%${keyword}%`, `%${keyword}%`, limit.toString(), offset.toString()]
     );
 
+    // 应用可见性过滤（特别是互关好友的情况需要额外检查）
+    const filteredRows = await filterPostsByVisibility(rows, currentUserId);
+
     // 使用批量查询优化性能，避免N+1查询问题
-    if (rows.length > 0) {
-      const postIds = rows.map(post => post.id);
+    if (filteredRows.length > 0) {
+      const postIds = filteredRows.map(post => post.id);
       const placeholders = postIds.map(() => '?').join(',');
       
       // 批量获取所有图片（包含is_free_preview属性）
@@ -1126,7 +1143,7 @@ router.get('/search', optionalAuth, async (req, res) => {
       }
       
       // 为每个笔记填充数据
-      for (let post of rows) {
+      for (let post of filteredRows) {
         // 使用助手函数处理付费内容保护（搜索不返回视频URL）
         const paymentSetting = paymentSettingsByPostId[post.id];
         const isAuthor = currentUserId && post.user_id === currentUserId;
@@ -1154,13 +1171,13 @@ router.get('/search', optionalAuth, async (req, res) => {
     );
     const total = countResult[0].total;
 
-    console.log(`  搜索笔记结果 - 找到 ${total} 个笔记，当前页 ${rows.length} 个`);
+    console.log(`  搜索笔记结果 - 找到 ${total} 个笔记，当前页 ${filteredRows.length} 个`);
 
     res.json({
       code: RESPONSE_CODES.SUCCESS,
       message: 'success',
       data: {
-        posts: rows,
+        posts: filteredRows,
         keyword,
         pagination: {
           page,
