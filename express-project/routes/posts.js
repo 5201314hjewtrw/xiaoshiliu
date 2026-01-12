@@ -139,8 +139,8 @@ router.get('/', optionalAuth, async (req, res) => {
     // 特殊处理推荐频道：热度新鲜度评分前20%的笔记按分数排序
     if (category === 'recommend') {
       // 先获取总笔记数计算20%的数量
-      const visibilityFilterCount = getVisibilityWhereClause(currentUserId, '');
-      let countQuery = `SELECT COUNT(*) as total FROM posts WHERE is_draft = ? AND ${visibilityFilterCount.condition.replace(/\./g, '')}`;
+      const visibilityFilterCount = getVisibilityWhereClause(currentUserId, '', false);
+      let countQuery = `SELECT COUNT(*) as total FROM posts WHERE is_draft = ? AND ${visibilityFilterCount.condition}`;
       let countParams = [isDraft.toString(), ...visibilityFilterCount.params];
 
       if (type) {
@@ -455,10 +455,8 @@ router.get('/following', authenticateToken, async (req, res) => {
 
     // 构建类型筛选条件
     let typeCondition = '';
-    let queryParams = [currentUserId.toString()];
     if (type) {
       typeCondition = 'AND p.type = ?';
-      queryParams.push(type.toString());
     }
 
     // 添加可见性过滤
@@ -477,7 +475,9 @@ router.get('/following', authenticateToken, async (req, res) => {
       ${orderBy}
       LIMIT ? OFFSET ?
     `;
-    queryParams = [...visibilityFilter.params, currentUserId.toString()];
+    
+    // Build query parameters in correct order
+    let queryParams = [...visibilityFilter.params, currentUserId.toString()];
     if (type) {
       queryParams.push(type.toString());
     }

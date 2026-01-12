@@ -210,6 +210,7 @@ import { createPost, getPostDetail, updatePost, deletePost } from '@/api/posts'
 import { getCategories } from '@/api/categories'
 import { useScrollLock } from '@/composables/useScrollLock'
 import { hasMentions, cleanMentions } from '@/utils/mentionParser'
+import { VISIBILITY, VISIBILITY_OPTIONS } from '@/constants/visibility'
 
 import MultiImageUpload from '@/components/MultiImageUpload.vue'
 import VideoUpload from '@/components/VideoUpload.vue'
@@ -276,12 +277,8 @@ const isEditMode = ref(false)
 
 const categories = ref([])
 
-// 可见性选项
-const visibilityOptions = [
-  { value: 0, label: '公开' },
-  { value: 1, label: '私密' },
-  { value: 2, label: '仅互关好友可见' }
-]
+// 可见性选项 - 使用共享常量
+const visibilityOptions = VISIBILITY_OPTIONS
 
 // 提及用户数据（实际使用中应该从 API 获取）
 const mentionUsers = ref([])

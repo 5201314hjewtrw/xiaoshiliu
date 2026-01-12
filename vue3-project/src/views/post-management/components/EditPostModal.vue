@@ -11,6 +11,7 @@ import { updatePost, getPostDetail } from '@/api/posts'
 import { getCategories } from '@/api/categories'
 import FormModal from '@/views/admin/components/FormModal.vue'
 import MessageToast from '@/components/MessageToast.vue'
+import { VISIBILITY_OPTIONS } from '@/constants/visibility'
 
 const props = defineProps({
   visible: {
@@ -100,11 +101,7 @@ const formFields = computed(() => {
       label: '可见性',
       type: 'select',
       placeholder: '请选择可见性',
-      options: [
-        { value: 0, label: '公开' },
-        { value: 1, label: '私密' },
-        { value: 2, label: '仅互关好友可见' }
-      ],
+      options: VISIBILITY_OPTIONS,
       required: true
     },
     {

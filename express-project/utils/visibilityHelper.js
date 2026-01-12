@@ -21,18 +21,18 @@ async function areMutualFriends(userId1, userId2) {
   }
   
   try {
-    // 检查用户1是否关注用户2，且用户2是否关注用户1
+    // 使用 JOIN 优化查询：一次查询检查双向关注
     const [result] = await pool.execute(
-      `SELECT 
-        (SELECT COUNT(*) FROM follows WHERE follower_id = ? AND following_id = ?) as user1_follows_user2,
-        (SELECT COUNT(*) FROM follows WHERE follower_id = ? AND following_id = ?) as user2_follows_user1`,
-      [userId1, userId2, userId2, userId1]
+      `SELECT COUNT(*) as mutual_count
+       FROM follows f1
+       INNER JOIN follows f2 
+         ON f1.follower_id = f2.following_id 
+         AND f1.following_id = f2.follower_id
+       WHERE f1.follower_id = ? AND f1.following_id = ?`,
+      [userId1, userId2]
     );
     
-    const user1FollowsUser2 = result[0].user1_follows_user2 > 0;
-    const user2FollowsUser1 = result[0].user2_follows_user1 > 0;
-    
-    return user1FollowsUser2 && user2FollowsUser1;
+    return result[0].mutual_count > 0;
   } catch (error) {
     console.error('检查互关关系失败:', error);
     return false;
@@ -112,13 +112,16 @@ async function canViewPost(postId, currentUserId, post = null) {
  * 生成可见性过滤的WHERE条件
  * @param {number} currentUserId - 当前用户ID（可以为null）
  * @param {string} postTableAlias - posts表的别名，默认为'p'
+ * @param {boolean} includeAlias - 是否在条件中包含表别名，默认为true
  * @returns {Object} - { condition: string, params: array }
  */
-function getVisibilityWhereClause(currentUserId, postTableAlias = 'p') {
+function getVisibilityWhereClause(currentUserId, postTableAlias = 'p', includeAlias = true) {
+  const prefix = includeAlias ? `${postTableAlias}.` : '';
+  
   if (!currentUserId) {
     // 未登录用户：只能看到公开的笔记
     return {
-      condition: `${postTableAlias}.visibility = ?`,
+      condition: `${prefix}visibility = ?`,
       params: [VISIBILITY.PUBLIC]
     };
   }
@@ -126,7 +129,7 @@ function getVisibilityWhereClause(currentUserId, postTableAlias = 'p') {
   // 已登录用户：可以看到自己的所有笔记、公开的笔记、以及互关好友的笔记
   // 注意：互关好友的检查需要在查询结果后过滤，这里先包含所有非私密的笔记
   return {
-    condition: `(${postTableAlias}.user_id = ? OR ${postTableAlias}.visibility IN (?, ?))`,
+    condition: `(${prefix}user_id = ? OR ${prefix}visibility IN (?, ?))`,
     params: [currentUserId, VISIBILITY.PUBLIC, VISIBILITY.MUTUAL_FRIENDS]
   };
 }
