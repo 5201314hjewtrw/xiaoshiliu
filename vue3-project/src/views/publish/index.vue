@@ -143,6 +143,19 @@
             value-key="id" max-width="300px" min-width="200px" @change="handleCategoryChange" />
         </div>
 
+        <div class="visibility-section">
+          <div class="section-title">可见性</div>
+          <DropdownSelect 
+            v-model="form.visibility" 
+            :options="visibilityOptions" 
+            placeholder="请选择可见性" 
+            label-key="label"
+            value-key="value" 
+            max-width="300px" 
+            min-width="200px" 
+          />
+        </div>
+
         <div class="tag-section">
           <div class="section-title">标签 (最多10个)</div>
           <TagSelector v-model="form.tags" :max-tags="10" />
@@ -245,6 +258,7 @@ const form = reactive({
   video: null,
   tags: [],
   category_id: null,
+  visibility: 0, // 默认为公开 (0: 公开, 1: 私密, 2: 仅互关好友可见)
   attachment: null,
   paymentSettings: {
     enabled: false,
@@ -261,6 +275,13 @@ const currentDraftId = ref(null)
 const isEditMode = ref(false)
 
 const categories = ref([])
+
+// 可见性选项
+const visibilityOptions = [
+  { value: 0, label: '公开' },
+  { value: 1, label: '私密' },
+  { value: 2, label: '仅互关好友可见' }
+]
 
 // 提及用户数据（实际使用中应该从 API 获取）
 const mentionUsers = ref([])
@@ -750,6 +771,7 @@ const handlePublish = async () => {
       category_id: form.category_id,
       type: uploadType.value === 'image' ? 1 : 2, // 1: 图文, 2: 视频
       is_draft: false, // 发布状态
+      visibility: form.visibility, // 可见性设置
       attachment: form.attachment || null,
       paymentSettings: form.paymentSettings.enabled ? form.paymentSettings : null
     }
@@ -801,6 +823,7 @@ const resetForm = () => {
   form.video = null
   form.tags = []
   form.category_id = null
+  form.visibility = 0 // 重置为默认公开
   form.attachment = null
   form.paymentSettings = {
     enabled: false,
@@ -888,6 +911,9 @@ const loadDraftData = async (draftId) => {
       } else {
         form.category_id = null
       }
+
+      // 加载可见性设置
+      form.visibility = draft.visibility !== undefined ? draft.visibility : 0 // 默认公开
 
       // 根据草稿数据类型设置uploadType
       if (fullData.type === 2 || (form.video && form.video.url)) {
@@ -1017,6 +1043,7 @@ const handleSaveDraft = async () => {
       category_id: form.category_id || null,
       type: uploadType.value === 'image' ? 1 : 2, // 1: 图文, 2: 视频
       is_draft: true,
+      visibility: form.visibility, // 可见性设置
       attachment: form.attachment || null,
       paymentSettings: form.paymentSettings.enabled ? form.paymentSettings : null
     }
@@ -1723,6 +1750,10 @@ const handleSaveDraft = async () => {
 }
 
 .category-section {
+  margin-bottom: 1rem;
+}
+
+.visibility-section {
   margin-bottom: 1rem;
 }
 
