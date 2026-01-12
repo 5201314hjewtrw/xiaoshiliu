@@ -16,6 +16,93 @@ const {
   protectPostDetail 
 } = require('../utils/paidContentHelper');
 
+// 可见性常量
+const VALID_VISIBILITY_VALUES = ['public', 'private', 'mutual_followers'];
+
+/**
+ * 检查用户是否可以查看笔记（基于可见性设置）
+ * @param {Object} post - 笔记对象
+ * @param {number} currentUserId - 当前用户ID
+ * @returns {Promise<boolean>} 是否可见
+ */
+async function canViewPost(post, currentUserId) {
+  // 草稿只有作者可见
+  if (post.is_draft === 1) {
+    return currentUserId && post.user_id === currentUserId;
+  }
+
+  // 公开笔记所有人可见
+  if (post.visibility === 'public') {
+    return true;
+  }
+
+  // 私密笔记只有作者可见
+  if (post.visibility === 'private') {
+    return currentUserId && post.user_id === currentUserId;
+  }
+
+  // 互关好友可见笔记
+  if (post.visibility === 'mutual_followers') {
+    // 作者自己可见
+    if (currentUserId && post.user_id === currentUserId) {
+      return true;
+    }
+    
+    // 检查是否互关
+    if (currentUserId) {
+      const [mutualFollow] = await pool.execute(
+        `SELECT 1 FROM follows f1 
+         INNER JOIN follows f2 ON f1.follower_id = f2.following_id AND f1.following_id = f2.follower_id
+         WHERE f1.follower_id = ? AND f1.following_id = ?
+         LIMIT 1`,
+        [currentUserId, post.user_id]
+      );
+      return mutualFollow.length > 0;
+    }
+    
+    return false;
+  }
+
+  return false;
+}
+
+/**
+ * 构建可见性查询条件
+ * @param {number} currentUserId - 当前用户ID（可选）
+ * @param {string} tableAlias - 表别名（默认为'p'）
+ * @returns {Object} { whereClause, params }
+ */
+function buildVisibilityCondition(currentUserId, tableAlias = 'p') {
+  if (!currentUserId) {
+    // 未登录用户只能看公开笔记
+    return {
+      whereClause: `${tableAlias}.visibility = 'public'`,
+      params: []
+    };
+  }
+
+  // 已登录用户可以看到：
+  // 1. 公开笔记
+  // 2. 自己的笔记（包括私密和互关好友可见）
+  // 3. 互关好友的互关好友可见笔记
+  return {
+    whereClause: `(
+      ${tableAlias}.visibility = 'public' 
+      OR ${tableAlias}.user_id = ?
+      OR (
+        ${tableAlias}.visibility = 'mutual_followers' 
+        AND EXISTS (
+          SELECT 1 FROM follows f1 
+          INNER JOIN follows f2 ON f1.follower_id = f2.following_id AND f1.following_id = f2.follower_id
+          WHERE f1.follower_id = ? AND f1.following_id = ${tableAlias}.user_id
+        )
+      )
+    )`,
+    params: [currentUserId, currentUserId]
+  };
+}
+
+
 // 获取笔记列表
 router.get('/', optionalAuth, async (req, res) => {
   try {
@@ -127,11 +214,21 @@ router.get('/', optionalAuth, async (req, res) => {
     `;
     let queryParams = [isDraft.toString()];
 
+    // 添加可见性过滤条件
+    const visibilityCondition = buildVisibilityCondition(currentUserId, 'p');
+    query += ` AND ${visibilityCondition.whereClause}`;
+    queryParams.push(...visibilityCondition.params);
+
     // 特殊处理推荐频道：热度新鲜度评分前20%的笔记按分数排序
     if (category === 'recommend') {
       // 先获取总笔记数计算20%的数量
       let countQuery = 'SELECT COUNT(*) as total FROM posts WHERE is_draft = ?';
       let countParams = [isDraft.toString()];
+      
+      // 添加可见性过滤
+      const countVisibilityCondition = buildVisibilityCondition(currentUserId);
+      countQuery += ` AND ${countVisibilityCondition.whereClause}`;
+      countParams.push(...countVisibilityCondition.params);
 
       if (type) {
         countQuery += ' AND type = ?';
@@ -143,6 +240,12 @@ router.get('/', optionalAuth, async (req, res) => {
       // 推荐算法：70%热度+30%新鲜度评分，新发布24小时内的笔记获得新鲜度加分，筛选前20%按分数排序
       let innerWhere = 'p.is_draft = ?';
       let innerParams = [isDraft.toString()];
+      
+      // 添加可见性过滤到内部查询
+      const innerVisibilityCondition = buildVisibilityCondition(currentUserId, 'p');
+      innerWhere += ` AND ${innerVisibilityCondition.whereClause}`;
+      innerParams.push(...innerVisibilityCondition.params);
+      
       if (type) {
         innerWhere += ' AND p.type = ?';
         innerParams.push(type);
@@ -319,6 +422,11 @@ router.get('/', optionalAuth, async (req, res) => {
       // 推荐频道的总数限制为总笔记数的20%
       let countQuery = 'SELECT COUNT(*) as total FROM posts WHERE is_draft = ?';
       let countParams = [isDraft.toString()];
+      
+      // 添加可见性过滤
+      const countVisibilityCondition = buildVisibilityCondition(currentUserId);
+      countQuery += ` AND ${countVisibilityCondition.whereClause}`;
+      countParams.push(...countVisibilityCondition.params);
 
       if (type) {
         countQuery += ' AND type = ?';
@@ -331,6 +439,12 @@ router.get('/', optionalAuth, async (req, res) => {
     } else {
       let countQuery = 'SELECT COUNT(*) as total FROM posts WHERE is_draft = ?';
       let countParams = [isDraft.toString()];
+      
+      // 添加可见性过滤
+      const countVisibilityCondition = buildVisibilityCondition(currentUserId);
+      countQuery += ` AND ${countVisibilityCondition.whereClause}`;
+      countParams.push(...countVisibilityCondition.params);
+      
       let countWhereConditions = [];
 
       if (category) {
@@ -448,6 +562,9 @@ router.get('/following', authenticateToken, async (req, res) => {
       queryParams.push(type.toString());
     }
 
+    // 添加可见性过滤条件
+    const visibilityCondition = buildVisibilityCondition(currentUserId, 'p');
+
     // 获取关注用户的笔记
     const query = `
       SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified, c.name as category
@@ -456,11 +573,12 @@ router.get('/following', authenticateToken, async (req, res) => {
       LEFT JOIN categories c ON p.category_id = c.id
       WHERE p.is_draft = 0 
         AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
+        AND ${visibilityCondition.whereClause}
         ${typeCondition}
       ${orderBy}
       LIMIT ? OFFSET ?
     `;
-    queryParams.push(limit.toString(), offset.toString());
+    queryParams.push(...visibilityCondition.params, limit.toString(), offset.toString());
 
     const [rows] = await pool.execute(query, queryParams);
 
@@ -569,9 +687,10 @@ router.get('/following', authenticateToken, async (req, res) => {
       SELECT COUNT(*) as total FROM posts p
       WHERE p.is_draft = 0 
         AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)
+        AND ${visibilityCondition.whereClause}
         ${typeCondition}
     `;
-    let countParams = [currentUserId.toString()];
+    let countParams = [currentUserId.toString(), ...visibilityCondition.params];
     if (type) {
       countParams.push(type.toString());
     }
@@ -619,6 +738,15 @@ router.get('/:id', optionalAuth, async (req, res) => {
     }
 
     const post = rows[0];
+
+    // 检查可见性权限
+    const canView = await canViewPost(post, currentUserId);
+    if (!canView) {
+      return res.status(HTTP_STATUS.FORBIDDEN).json({ 
+        code: RESPONSE_CODES.FORBIDDEN, 
+        message: post.visibility === 'private' ? '该笔记为私密笔记' : '该笔记仅互关好友可见' 
+      });
+    }
 
     // 根据帖子类型获取对应的媒体文件
     if (post.type === 1) {
@@ -756,9 +884,10 @@ router.get('/:id', optionalAuth, async (req, res) => {
 // 创建笔记
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { title, content, category_id, images, video, tags, is_draft, type, attachment, paymentSettings } = req.body;
+    const { title, content, category_id, images, video, tags, is_draft, type, attachment, paymentSettings, visibility } = req.body;
     const userId = req.user.id;
     const postType = type || 1; // 默认为图文类型
+    const postVisibility = visibility || 'public'; // 默认为公开
 
     console.log('=== 创建笔记请求 ===');
     console.log('用户ID:', userId);
@@ -767,16 +896,23 @@ router.post('/', authenticateToken, async (req, res) => {
     console.log('分类ID:', category_id);
     console.log('发布类型:', postType);
     console.log('是否草稿:', is_draft);
+    console.log('可见性:', postVisibility);
     console.log('图片数量:', images ? images.length : 0);
     console.log('视频数据:', video ? JSON.stringify(video) : 'null');
     console.log('附件数据:', attachment ? JSON.stringify(attachment) : 'null');
     console.log('付费设置:', paymentSettings ? JSON.stringify(paymentSettings) : 'null');
     console.log('标签:', tags);
 
-    // 验证必填字段：发布时要求标题和内容，草稿时不强制要求
-    if (!is_draft && (!title || !content)) {
-      console.log('❌ 验证失败: 标题或内容为空');
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题和内容不能为空' });
+    // 验证必填字段：发布时要求标题、内容和分类，草稿时不强制要求
+    if (!is_draft && (!title || !content || !category_id)) {
+      console.log('❌ 验证失败: 标题、内容或分类为空');
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题、内容和分类不能为空' });
+    }
+
+    // 验证可见性设置
+    if (postVisibility && !VALID_VISIBILITY_VALUES.includes(postVisibility)) {
+      console.log('❌ 验证失败: 无效的可见性设置');
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '无效的可见性设置' });
     }
 
     // 对内容进行安全过滤，防止XSS攻击
@@ -791,8 +927,8 @@ router.post('/', authenticateToken, async (req, res) => {
     // 插入笔记
     console.log('📝 开始插入笔记到数据库...');
     const [result] = await pool.execute(
-      'INSERT INTO posts (user_id, title, content, category_id, is_draft, type) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, title || '', sanitizedContent, category_id || null, is_draft ? 1 : 0, postType]
+      'INSERT INTO posts (user_id, title, content, category_id, is_draft, type, visibility) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [userId, title || '', sanitizedContent, category_id || null, is_draft ? 1 : 0, postType, postVisibility]
     );
 
     const postId = result.insertId;
@@ -1000,15 +1136,19 @@ router.get('/search', optionalAuth, async (req, res) => {
 
     console.log(`🔍 搜索笔记 - 关键词: ${keyword}, 页码: ${page}, 每页: ${limit}, 当前用户ID: ${currentUserId}`);
 
+    // 添加可见性过滤条件
+    const visibilityCondition = buildVisibilityCondition(currentUserId, 'p');
+
     // 搜索笔记：支持标题和内容搜索（只搜索已激活的笔记）
     const [rows] = await pool.execute(
       `SELECT p.*, u.nickname, u.avatar as user_avatar, u.user_id as author_account, u.id as author_auto_id, u.location, u.verified
        FROM posts p
        LEFT JOIN users u ON p.user_id = u.id
        WHERE p.is_draft = 0 AND (p.title LIKE ? OR p.content LIKE ?)
+         AND ${visibilityCondition.whereClause}
        ORDER BY p.created_at DESC
        LIMIT ? OFFSET ?`,
-      [`%${keyword}%`, `%${keyword}%`, limit.toString(), offset.toString()]
+      [`%${keyword}%`, `%${keyword}%`, ...visibilityCondition.params, limit.toString(), offset.toString()]
     );
 
     // 使用批量查询优化性能，避免N+1查询问题
@@ -1108,9 +1248,10 @@ router.get('/search', optionalAuth, async (req, res) => {
 
     // 获取总数（只统计已激活的笔记）
     const [countResult] = await pool.execute(
-      `SELECT COUNT(*) as total FROM posts 
-       WHERE is_draft = 0 AND (title LIKE ? OR content LIKE ?)`,
-      [`%${keyword}%`, `%${keyword}%`]
+      `SELECT COUNT(*) as total FROM posts p
+       WHERE p.is_draft = 0 AND (p.title LIKE ? OR p.content LIKE ?)
+         AND ${visibilityCondition.whereClause}`,
+      [`%${keyword}%`, `%${keyword}%`, ...visibilityCondition.params]
     );
     const total = countResult[0].total;
 
@@ -1308,7 +1449,7 @@ router.post('/:id/collect', authenticateToken, async (req, res) => {
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const postId = req.params.id;
-    const { title, content, category_id, images, video, tags, is_draft, attachment, paymentSettings } = req.body;
+    const { title, content, category_id, images, video, tags, is_draft, attachment, paymentSettings, visibility } = req.body;
     const userId = req.user.id;
 
     // 验证必填字段：如果不是草稿（is_draft=0），则要求标题、内容和分类不能为空
@@ -1316,6 +1457,13 @@ router.put('/:id', authenticateToken, async (req, res) => {
       console.log('验证失败 - 必填字段缺失:', { title, content, category_id, is_draft });
       return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题、内容和分类不能为空' });
     }
+
+    // 验证可见性设置
+    if (visibility && !VALID_VISIBILITY_VALUES.includes(visibility)) {
+      console.log('❌ 验证失败: 无效的可见性设置');
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '无效的可见性设置' });
+    }
+
     const sanitizedContent = content ? sanitizeContent(content) : '';
 
     // 检查笔记是否存在且属于当前用户
@@ -1340,10 +1488,19 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const originalContent = originalPostRows.length > 0 ? originalPostRows[0].content : '';
 
     // 更新笔记基本信息
-    await pool.execute(
-      'UPDATE posts SET title = ?, content = ?, category_id = ?, is_draft = ? WHERE id = ?',
-      [title || '', sanitizedContent, category_id || null, (is_draft ? 1 : 0).toString(), postId.toString()]
-    );
+    let updateQuery = 'UPDATE posts SET title = ?, content = ?, category_id = ?, is_draft = ?';
+    let updateParams = [title || '', sanitizedContent, category_id || null, (is_draft ? 1 : 0).toString()];
+    
+    // 如果提供了visibility参数，则更新
+    if (visibility !== undefined) {
+      updateQuery += ', visibility = ?';
+      updateParams.push(visibility);
+    }
+    
+    updateQuery += ' WHERE id = ?';
+    updateParams.push(postId.toString());
+    
+    await pool.execute(updateQuery, updateParams);
 
     // 根据笔记类型处理媒体文件
     if (postType === 2) {
