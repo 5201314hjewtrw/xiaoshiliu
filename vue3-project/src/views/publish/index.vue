@@ -96,7 +96,7 @@
               <div class="form-group">
                 <label class="form-label">标题</label>
                 <div class="input-wrapper">
-                  <input v-model="form.title" type="text" class="title-input" placeholder="给笔记起个标题吧" maxlength="100"
+                  <input v-model="form.title" type="text" class="title-input" placeholder="请输入标题" maxlength="100"
                     @input="validateForm" />
                   <div class="char-count">{{ form.title.length }}/100</div>
                 </div>
@@ -106,7 +106,7 @@
                 <label class="form-label">正文</label>
                 <div class="content-input-wrapper">
                   <ContentEditableInput ref="contentTextarea" v-model="form.content" :input-class="'content-textarea'"
-                    placeholder="分享你的想法..." :enable-mention="true" :mention-users="mentionUsers" @focus="handleContentFocus"
+                    placeholder="请输入内容" :enable-mention="true" :mention-users="mentionUsers" @focus="handleContentFocus"
                     @blur="handleContentBlur" @keydown="handleInputKeydown" @mention="handleMentionInput" />
                   <div class="content-footer">
                     <div class="content-actions">
@@ -154,7 +154,7 @@
               
               <div class="form-group">
                 <label class="form-label">分类</label>
-                <DropdownSelect v-model="form.category_id" :options="categories" placeholder="选择一个分类" label-key="name"
+                <DropdownSelect v-model="form.category_id" :options="categories" placeholder="请选择分类" label-key="name"
                   value-key="id" max-width="100%" min-width="100%" @change="handleCategoryChange" />
               </div>
 
@@ -1537,7 +1537,7 @@ const handleSaveDraft = async () => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--overlay-bg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1548,7 +1548,7 @@ const handleSaveDraft = async () => {
 .emoji-panel {
   background: var(--bg-color-primary);
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--shadow-color) 0 8px 32px;
   overflow: hidden;
   animation: scaleIn 0.2s ease;
   max-width: 90vw;
