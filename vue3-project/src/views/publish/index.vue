@@ -137,15 +137,45 @@
           <MentionModal :visible="showMentionPanel" @close="closeMentionPanel" @select="handleMentionSelect" />
         </div>
 
-        <div class="category-section">
-          <div class="section-title">分类</div>
-          <DropdownSelect v-model="form.category_id" :options="categories" placeholder="请选择分类" label-key="name"
-            value-key="id" max-width="300px" min-width="200px" @change="handleCategoryChange" />
+        <div class="visibility-section">
+          <div class="section-title">可见性</div>
+          <div class="visibility-options">
+            <button 
+              type="button" 
+              class="visibility-btn"
+              :class="{ active: form.visibility === 'public' }"
+              @click="form.visibility = 'public'"
+            >
+              <SvgIcon name="world" width="18" height="18" />
+              <span>公开</span>
+            </button>
+            <button 
+              type="button" 
+              class="visibility-btn"
+              :class="{ active: form.visibility === 'mutual_followers' }"
+              @click="form.visibility = 'mutual_followers'"
+            >
+              <SvgIcon name="users" width="18" height="18" />
+              <span>互关好友可见</span>
+            </button>
+            <button 
+              type="button" 
+              class="visibility-btn"
+              :class="{ active: form.visibility === 'private' }"
+              @click="form.visibility = 'private'"
+            >
+              <SvgIcon name="lock" width="18" height="18" />
+              <span>私密</span>
+            </button>
+          </div>
         </div>
 
-        <div class="tag-section">
-          <div class="section-title">标签 (最多10个)</div>
-          <TagSelector v-model="form.tags" :max-tags="10" />
+        <div class="tag-hint-section">
+          <div class="section-title">
+            <SvgIcon name="tag" width="16" height="16" />
+            <span>在内容中使用 #标签名 添加标签</span>
+          </div>
+          <div class="tag-hint-text">例如：今天天气真好 #日常 #心情</div>
         </div>
       </form>
 
@@ -194,15 +224,12 @@ import { useUserStore } from '@/stores/user'
 import { useAuthStore } from '@/stores/auth'
 import { useNavigationStore } from '@/stores/navigation'
 import { createPost, getPostDetail, updatePost, deletePost } from '@/api/posts'
-import { getCategories } from '@/api/categories'
 import { useScrollLock } from '@/composables/useScrollLock'
 import { hasMentions, cleanMentions } from '@/utils/mentionParser'
 
 import MultiImageUpload from '@/components/MultiImageUpload.vue'
 import VideoUpload from '@/components/VideoUpload.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
-import TagSelector from '@/components/TagSelector.vue'
-import DropdownSelect from '@/components/DropdownSelect.vue'
 import MessageToast from '@/components/MessageToast.vue'
 import EmojiPicker from '@/components/EmojiPicker.vue'
 import MentionModal from '@/components/mention/MentionModal.vue'
@@ -210,6 +237,23 @@ import ContentEditableInput from '@/components/ContentEditableInput.vue'
 import TextImageModal from '@/views/publish/components/TextImageModal.vue'
 import AttachmentUploadModal from '@/components/AttachmentUploadModal.vue'
 import PaymentSettingsModal from '@/components/PaymentSettingsModal.vue'
+
+/**
+ * 从内容中提取标签（#标签格式）
+ * @param {string} content - 内容文本
+ * @returns {Array<string>} 标签数组
+ */
+function extractTagsFromContent(content) {
+  if (!content) return []
+  
+  // 匹配 #标签 格式，支持中文、英文、数字、下划线
+  const tagRegex = /#([a-zA-Z0-9\u4e00-\u9fa5_]+)/g
+  const matches = [...content.matchAll(tagRegex)]
+  const tags = matches.map(match => match[1])
+  
+  // 去重并限制最多10个标签
+  return [...new Set(tags)].slice(0, 10)
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -245,6 +289,7 @@ const form = reactive({
   video: null,
   tags: [],
   category_id: null,
+  visibility: 'public', // 默认公开
   attachment: null,
   paymentSettings: {
     enabled: false,
@@ -260,14 +305,12 @@ const form = reactive({
 const currentDraftId = ref(null)
 const isEditMode = ref(false)
 
-const categories = ref([])
-
 // 提及用户数据（实际使用中应该从 API 获取）
 const mentionUsers = ref([])
 
 const canPublish = computed(() => {
-  // 检查必填字段：标题、内容、分类
-  if (!form.title.trim() || !form.content.trim() || !form.category_id) {
+  // 检查必填字段：标题、内容（分类已移除）
+  if (!form.title.trim() || !form.content.trim()) {
     return false
   }
   
@@ -348,8 +391,6 @@ const openLoginModal = () => {
 
 onMounted(async () => {
   navigationStore.scrollToTop('instant')
-  // 先加载分类列表，确保分类数据可用
-  await loadCategories()
   // 检查是否是编辑草稿模式
   const draftId = route.query.draftId
   const mode = route.query.mode
@@ -361,21 +402,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
 })
-
-const loadCategories = async () => {
-  try {
-    const response = await getCategories()
-    if (response.success && response.data) {
-      categories.value = response.data.map(category => ({
-        id: category.id,
-        name: category.name
-      }))
-    }
-  } catch (error) {
-    console.error('加载分类失败:', error)
-    showMessage('加载分类失败', 'error')
-  }
-}
 
 const validateForm = () => {
   return true
@@ -502,10 +528,6 @@ const formatAttachmentSize = (bytes) => {
   const sizes = ['B', 'KB', 'MB', 'GB']
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-}
-
-const handleCategoryChange = (data) => {
-  form.category_id = data.value
 }
 
 const handleContentFocus = () => {
@@ -636,11 +658,6 @@ const handlePublish = async () => {
     return
   }
 
-  if (!form.category_id) {
-    showMessage('请选择分类', 'error')
-    return
-  }
-
   // 根据上传类型验证媒体文件
   if (uploadType.value === 'image') {
     if (!multiImageUploadRef.value || multiImageUploadRef.value.getImageCount() === 0) {
@@ -741,13 +758,17 @@ const handlePublish = async () => {
       }
     }
 
+    // 从内容中提取标签
+    const extractedTags = extractTagsFromContent(form.content)
+
     const postData = {
       title: form.title.trim(),
       content: form.content,
       images: uploadType.value === 'image' ? mediaData : [],
       video: uploadType.value === 'video' ? mediaData : null,
-      tags: form.tags,
-      category_id: form.category_id,
+      tags: extractedTags,
+      category_id: form.category_id || null, // 可选字段
+      visibility: form.visibility, // 添加可见性设置
       type: uploadType.value === 'image' ? 1 : 2, // 1: 图文, 2: 视频
       is_draft: false, // 发布状态
       attachment: form.attachment || null,
@@ -801,6 +822,7 @@ const resetForm = () => {
   form.video = null
   form.tags = []
   form.category_id = null
+  form.visibility = 'public' // 重置为默认公开
   form.attachment = null
   form.paymentSettings = {
     enabled: false,
@@ -830,6 +852,9 @@ const loadDraftData = async (draftId) => {
       form.title = response.title || ''
       form.content = draft.content || ''
       form.images = draft.images || []
+      
+      // 设置可见性（如果有的话）
+      form.visibility = draft.visibility || fullData.visibility || 'public'
       
       // 设置视频数据 - 从fullData中获取视频信息
       if (fullData.video_url) {
@@ -867,7 +892,7 @@ const loadDraftData = async (draftId) => {
         }
       }
 
-      // 处理标签数据：确保转换为字符串数组
+      // 处理标签数据：确保转换为字符串数组（从内容中提取）
       if (draft.tags && Array.isArray(draft.tags)) {
         form.tags = draft.tags.map(tag => {
           // 如果是对象格式，提取name字段
@@ -881,13 +906,8 @@ const loadDraftData = async (draftId) => {
         form.tags = []
       }
 
-      // 根据分类名称找到分类ID
-      if (response.category && categories.value.length > 0) {
-        const categoryItem = categories.value.find(cat => cat.name === response.category)
-        form.category_id = categoryItem ? categoryItem.id : null
-      } else {
-        form.category_id = null
-      }
+      // 分类ID已被移除，设置为null
+      form.category_id = null
 
       // 根据草稿数据类型设置uploadType
       if (fullData.type === 2 || (form.video && form.video.url)) {
@@ -1008,13 +1028,17 @@ const handleSaveDraft = async () => {
       }
     }
 
+    // 从内容中提取标签
+    const extractedTags = extractTagsFromContent(form.content)
+
     const draftData = {
       title: form.title.trim() || '',
       content: form.content || '',
       images: uploadType.value === 'image' ? mediaData : [],
       video: uploadType.value === 'video' ? mediaData : null,
-      tags: form.tags || [],
+      tags: extractedTags,
       category_id: form.category_id || null,
+      visibility: form.visibility, // 添加可见性设置
       type: uploadType.value === 'image' ? 1 : 2, // 1: 图文, 2: 视频
       is_draft: true,
       attachment: form.attachment || null,
@@ -1722,7 +1746,69 @@ const handleSaveDraft = async () => {
   border-color: var(--primary-color);
 }
 
-.category-section {
+/* 可见性设置样式 */
+.visibility-section {
+  margin-bottom: 1.5rem;
+}
+
+.visibility-options {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.visibility-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-color-secondary);
+  color: var(--text-color-secondary);
+  border: 1px solid var(--border-color-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.visibility-btn:hover {
+  background: var(--bg-color-tertiary);
+  border-color: var(--primary-color);
+}
+
+.visibility-btn.active {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+/* 标签提示样式 */
+.tag-hint-section {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: var(--bg-color-secondary);
+  border-radius: 8px;
+  border: 1px solid var(--border-color-primary);
+}
+
+.tag-hint-section .section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text-color-primary);
+  margin-bottom: 0.5rem;
+}
+
+.tag-hint-text {
+  font-size: 0.85rem;
+  color: var(--text-color-secondary);
+  line-height: 1.5;
+}
   margin-bottom: 1rem;
 }
 
