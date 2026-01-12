@@ -214,7 +214,7 @@ router.get('/', optionalAuth, async (req, res) => {
       }
 
       query += ` ORDER BY p.created_at DESC LIMIT ? OFFSET ?`;
-      queryParams = [isDraft.toString(), ...additionalParams, limit.toString(), offset.toString()];
+      queryParams = [isDraft.toString(), ...visibilityFilter.params, ...additionalParams, limit.toString(), offset.toString()];
     }
     const [rows] = await pool.execute(query, queryParams);
 
