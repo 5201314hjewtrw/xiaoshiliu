@@ -90,6 +90,15 @@ class DatabaseInitializer {
       // 创建系统设置表
       await this.createSystemSettingsTable(connection);
 
+      // 创建帖子付费设置表
+      await this.createPostPaymentSettingsTable(connection);
+
+      // 创建用户付费内容购买记录表
+      await this.createUserPurchasedContentTable(connection);
+
+      // 创建用户作者订阅表
+      await this.createUserAuthorSubscriptionsTable(connection);
+
       console.log('所有数据表创建完成!');
 
     } catch (error) {
@@ -210,8 +219,10 @@ class DatabaseInitializer {
         \`id\` bigint(20) NOT NULL AUTO_INCREMENT COMMENT '图片ID',
         \`post_id\` bigint(20) NOT NULL COMMENT '笔记ID',
         \`image_url\` varchar(500) NOT NULL COMMENT '图片URL',
+        \`is_free_preview\` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否免费预览：1-免费预览，0-付费内容',
         PRIMARY KEY (\`id\`),
         KEY \`idx_post_id\` (\`post_id\`),
+        KEY \`idx_is_free_preview\` (\`is_free_preview\`),
         CONSTRAINT \`post_images_ibfk_1\` FOREIGN KEY (\`post_id\`) REFERENCES \`posts\` (\`id\`) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='笔记图片表';
     `;
@@ -226,12 +237,15 @@ class DatabaseInitializer {
         \`post_id\` bigint(20) NOT NULL COMMENT '笔记ID',
         \`cover_url\` varchar(500) DEFAULT NULL COMMENT '视频封面URL',
         \`video_url\` varchar(500) NOT NULL COMMENT '视频URL',
+        \`dash_url\` varchar(500) DEFAULT NULL COMMENT 'DASH格式视频URL (manifest.mpd)',
+        \`preview_video_url\` varchar(500) DEFAULT NULL COMMENT '预览视频URL',
         \`mpd_path\` varchar(500) DEFAULT NULL COMMENT 'DASH MPD文件路径',
         \`transcode_status\` enum('pending','processing','completed','failed','none') DEFAULT 'none' COMMENT '转码状态',
         \`transcode_task_id\` varchar(100) DEFAULT NULL COMMENT '转码任务ID',
         PRIMARY KEY (\`id\`),
         KEY \`idx_post_id\` (\`post_id\`),
         KEY \`idx_transcode_status\` (\`transcode_status\`),
+        KEY \`idx_dash_url\` (\`dash_url\`),
         CONSTRAINT \`post_videos_ibfk_1\` FOREIGN KEY (\`post_id\`) REFERENCES \`posts\` (\`id\`) ON DELETE CASCADE
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='笔记视频表';
     `;
@@ -489,6 +503,74 @@ class DatabaseInitializer {
     `;
     await connection.execute(sql);
     console.log('✓ system_settings 表创建成功');
+  }
+
+  async createPostPaymentSettingsTable(connection) {
+    const sql = `
+      CREATE TABLE IF NOT EXISTS \`post_payment_settings\` (
+        \`id\` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+        \`post_id\` bigint(20) NOT NULL COMMENT '笔记ID',
+        \`enabled\` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否启用付费',
+        \`payment_type\` varchar(20) NOT NULL DEFAULT 'single' COMMENT '付费类型：single-单篇付费，multi-多篇付费',
+        \`price\` decimal(10,2) NOT NULL DEFAULT 0.00 COMMENT '价格（石榴点）',
+        \`free_preview_count\` int(11) NOT NULL DEFAULT 0 COMMENT '免费预览数量',
+        \`preview_duration\` int(11) NOT NULL DEFAULT 0 COMMENT '视频预览时长（秒）',
+        \`hide_all\` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否全部隐藏内容（仅隐藏内容文字，不隐藏标题）',
+        \`created_at\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        \`updated_at\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`uk_post_id\` (\`post_id\`),
+        KEY \`idx_post_id\` (\`post_id\`),
+        CONSTRAINT \`post_payment_settings_ibfk_1\` FOREIGN KEY (\`post_id\`) REFERENCES \`posts\` (\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='帖子付费设置表';
+    `;
+    await connection.execute(sql);
+    console.log('✓ post_payment_settings 表创建成功');
+  }
+
+  async createUserPurchasedContentTable(connection) {
+    const sql = `
+      CREATE TABLE IF NOT EXISTS \`user_purchased_content\` (
+        \`id\` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+        \`user_id\` bigint(20) NOT NULL COMMENT '购买用户ID',
+        \`post_id\` bigint(20) NOT NULL COMMENT '购买的笔记ID',
+        \`author_id\` bigint(20) NOT NULL COMMENT '作者ID',
+        \`price\` decimal(10,2) NOT NULL COMMENT '购买价格',
+        \`purchase_type\` varchar(20) NOT NULL DEFAULT 'single' COMMENT '购买类型：single-单篇购买，multi-多篇订阅',
+        \`created_at\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+        \`purchased_at\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '购买时间',
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`uk_user_post\` (\`user_id\`, \`post_id\`),
+        KEY \`idx_user_id\` (\`user_id\`),
+        KEY \`idx_post_id\` (\`post_id\`),
+        KEY \`idx_author_id\` (\`author_id\`),
+        CONSTRAINT \`user_purchased_content_ibfk_1\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`user_purchased_content_ibfk_2\` FOREIGN KEY (\`post_id\`) REFERENCES \`posts\` (\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`user_purchased_content_ibfk_3\` FOREIGN KEY (\`author_id\`) REFERENCES \`users\` (\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户付费内容购买记录表';
+    `;
+    await connection.execute(sql);
+    console.log('✓ user_purchased_content 表创建成功');
+  }
+
+  async createUserAuthorSubscriptionsTable(connection) {
+    const sql = `
+      CREATE TABLE IF NOT EXISTS \`user_author_subscriptions\` (
+        \`id\` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'ID',
+        \`user_id\` bigint(20) NOT NULL COMMENT '订阅用户ID',
+        \`author_id\` bigint(20) NOT NULL COMMENT '被订阅作者ID',
+        \`price\` decimal(10,2) NOT NULL COMMENT '订阅价格',
+        \`created_at\` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '订阅时间',
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`uk_user_author\` (\`user_id\`, \`author_id\`),
+        KEY \`idx_user_id\` (\`user_id\`),
+        KEY \`idx_author_id\` (\`author_id\`),
+        CONSTRAINT \`user_author_subscriptions_ibfk_1\` FOREIGN KEY (\`user_id\`) REFERENCES \`users\` (\`id\`) ON DELETE CASCADE,
+        CONSTRAINT \`user_author_subscriptions_ibfk_2\` FOREIGN KEY (\`author_id\`) REFERENCES \`users\` (\`id\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户作者订阅表';
+    `;
+    await connection.execute(sql);
+    console.log('✓ user_author_subscriptions 表创建成功');
   }
 
   async insertDefaultAdmin() {
