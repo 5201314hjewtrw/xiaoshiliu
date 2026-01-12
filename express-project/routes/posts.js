@@ -903,10 +903,10 @@ router.post('/', authenticateToken, async (req, res) => {
     console.log('付费设置:', paymentSettings ? JSON.stringify(paymentSettings) : 'null');
     console.log('标签:', tags);
 
-    // 验证必填字段：发布时要求标题和内容，草稿时不强制要求
-    if (!is_draft && (!title || !content)) {
-      console.log('❌ 验证失败: 标题或内容为空');
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题和内容不能为空' });
+    // 验证必填字段：发布时要求标题、内容和分类，草稿时不强制要求
+    if (!is_draft && (!title || !content || !category_id)) {
+      console.log('❌ 验证失败: 标题、内容或分类为空');
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题、内容和分类不能为空' });
     }
 
     // 验证可见性设置
@@ -1452,10 +1452,10 @@ router.put('/:id', authenticateToken, async (req, res) => {
     const { title, content, category_id, images, video, tags, is_draft, attachment, paymentSettings, visibility } = req.body;
     const userId = req.user.id;
 
-    // 验证必填字段：如果不是草稿（is_draft=0），则要求标题和内容不能为空
-    if (!is_draft && (!title || !content)) {
-      console.log('验证失败 - 必填字段缺失:', { title, content, is_draft });
-      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题和内容不能为空' });
+    // 验证必填字段：如果不是草稿（is_draft=0），则要求标题、内容和分类不能为空
+    if (!is_draft && (!title || !content || !category_id)) {
+      console.log('验证失败 - 必填字段缺失:', { title, content, category_id, is_draft });
+      return res.status(HTTP_STATUS.BAD_REQUEST).json({ code: RESPONSE_CODES.VALIDATION_ERROR, message: '发布时标题、内容和分类不能为空' });
     }
 
     // 验证可见性设置
